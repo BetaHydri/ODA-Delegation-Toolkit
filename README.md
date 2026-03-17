@@ -16,16 +16,21 @@ Manage WMI namespace security (DACL) from the command line. Add or remove access
 
 ## Available Permissions
 
-| Permission      | Constant              | Hex      |
-|-----------------|-----------------------|----------|
-| Enable          | WBEM_ENABLE           | `0x01`   |
-| MethodExecute   | WBEM_METHOD_EXECUTE   | `0x02`   |
-| FullWrite       | WBEM_FULL_WRITE_REP   | `0x04`   |
-| PartialWrite    | WBEM_PARTIAL_WRITE_REP| `0x08`   |
-| ProviderWrite   | WBEM_WRITE_PROVIDER   | `0x10`   |
-| RemoteAccess    | WBEM_REMOTE_ACCESS    | `0x20`   |
-| ReadSecurity    | READ_CONTROL          | `0x20000`|
-| WriteSecurity   | WRITE_DAC             | `0x40000`|
+Use these strings (case-insensitive) with the `-permissionsString` parameter, separated by commas.
+
+| Permission String | WMI Constant            | Hex        | Description                                                        |
+|-------------------|-------------------------|------------|--------------------------------------------------------------------|
+| `Enable`          | WBEM_ENABLE             | `0x00001`  | Grants read access to WMI objects (instances, classes, enumerations) |
+| `MethodExecute`   | WBEM_METHOD_EXECUTE     | `0x00002`  | Allows execution of WMI provider methods                            |
+| `FullWrite`       | WBEM_FULL_WRITE_REP     | `0x00004`  | Allows writing to static WMI repository classes and instances       |
+| `PartialWrite`    | WBEM_PARTIAL_WRITE_REP  | `0x00008`  | Allows writing to dynamic WMI provider objects                      |
+| `ProviderWrite`   | WBEM_WRITE_PROVIDER     | `0x00010`  | Allows writing of classes and instances to WMI providers             |
+| `RemoteAccess`    | WBEM_REMOTE_ACCESS      | `0x00020`  | Allows remote access to the namespace (DCOM/WinRM)                  |
+| `ReadSecurity`    | READ_CONTROL            | `0x20000`  | Allows reading the namespace security descriptor                    |
+| `WriteSecurity`   | WRITE_DAC               | `0x40000`  | Allows modifying the namespace security descriptor (DACL)           |
+
+> **Tip:** For typical monitoring or remote query scenarios, use `"Enable,MethodExecute,RemoteAccess"`.
+> For full administrative access, combine all permissions.
 
 ## Parameters
 
