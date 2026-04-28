@@ -46,12 +46,12 @@ Use these strings (case-insensitive) with the `-permissionsString` parameter, se
 
 ## Examples
 
-### Add ACL — grant basic remote access to a local user
+### Add ACL — grant basic remote access to a local group
 
 ```powershell
 .\Set-WMINamespaceACL.ps1 -namespace "Root\CIMV2" `
     -operation add `
-    -account ".\gast" `
+    -account ".\local-grp" `
     -permissionsString "Enable,MethodExecute,RemoteAccess" `
     -allowInherit $true
 ```
