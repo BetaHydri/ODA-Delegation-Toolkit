@@ -240,9 +240,49 @@ process {
     Write-Log $successMsg
     Write-Host $successMsg
 
-    # Show resulting SCM DACL in human-readable form
+    # Show resulting SCM DACL with actual SCM permission names
     $resultSddl = (& sc.exe $(if ($scTarget) { $scTarget }) sdshow scmanager 2>&1 |
         Where-Object { $_ -match '^[DOS]:' }) -join ''
-    ConvertFrom-SddlString $resultSddl |
-    Select-Object -ExpandProperty DiscretionaryAcl
+    $resultSD = New-Object System.Security.AccessControl.RawSecurityDescriptor($resultSddl)
+
+    # SCM-specific access rights lookup
+    $scmRights = @{
+        0x0001  = 'SC_MANAGER_CONNECT'
+        0x0002  = 'SC_MANAGER_CREATE_SERVICE'
+        0x0004  = 'SC_MANAGER_ENUMERATE_SERVICE'
+        0x0008  = 'SC_MANAGER_LOCK'
+        0x0010  = 'SC_MANAGER_QUERY_LOCK_STATUS'
+        0x0020  = 'SC_MANAGER_MODIFY_BOOT_CONFIG'
+        0x10000 = 'DELETE'
+        0x20000 = 'READ_CONTROL'
+        0x40000 = 'WRITE_DAC'
+        0x80000 = 'WRITE_OWNER'
+        0xF003F = 'SC_MANAGER_ALL_ACCESS'
+    }
+
+    foreach ($ace in $resultSD.DiscretionaryAcl) {
+        if ($ace -is [System.Security.AccessControl.CommonAce]) {
+            $sidObj = $ace.SecurityIdentifier
+            try {
+                $name = $sidObj.Translate([System.Security.Principal.NTAccount]).Value
+            }
+            catch {
+                $name = $sidObj.Value
+            }
+            $type = if ($ace.AceQualifier -eq [System.Security.AccessControl.AceQualifier]::AccessAllowed) {
+                'Allow'
+            } else {
+                'Deny'
+            }
+            $mask = $ace.AccessMask
+            $flags = @()
+            foreach ($bit in ($scmRights.Keys | Sort-Object -Descending)) {
+                if (($mask -band $bit) -eq $bit) {
+                    $flags += $scmRights[$bit]
+                }
+            }
+            if (-not $flags) { $flags = @("0x{0:X}" -f $mask) }
+            Write-Host ("  {0}: {1} ({2})" -f $name, $type, ($flags -join ', '))
+        }
+    }
 }
