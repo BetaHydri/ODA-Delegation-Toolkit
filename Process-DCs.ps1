@@ -8,6 +8,7 @@
     Root\directory, and Root\MicrosoftDFS namespaces.
     Additionally sets Service Control Manager (SCM) DACL via Set-SCM_ACL.ps1 to grant
     SC_MANAGER_ENUMERATE_SERVICE, which is required for Win32_Service queries.
+    All changes are logged to a timestamped log file in the script directory.
 
 .AUTHOR
     Jan Tiedemann
@@ -17,6 +18,7 @@
 #>
 
 $account = 'YOURDOMAIN\G-yourServiceGroup'
+$logPath = Join-Path $PSScriptRoot ('ACL-Changes_{0:yyyyMMdd_HHmmss}.log' -f (Get-Date))
 
 $dcs = @(
     'DC01.contoso.com', 'DC02.contoso.com'                          # contoso.com
@@ -31,11 +33,13 @@ $dcs = @(
 $setWmiAcl = [scriptblock]::Create((Get-Content -Path '.\Set-WMINamespaceACL.ps1' -Raw))
 $setScmAcl = [scriptblock]::Create((Get-Content -Path '.\Set-SCM_ACL.ps1' -Raw))
 
+Write-Host "Logging to: $logPath" -ForegroundColor Cyan
+
 foreach ($dc in $dcs) {
     Write-Host $dc -ForegroundColor Yellow
 
     Invoke-Command -ComputerName $dc -ScriptBlock {
-        param ($acct, $wmiScriptBody, $scmScriptBody)
+        param ($acct, $wmiScriptBody, $scmScriptBody, $log)
 
         $cmd = [scriptblock]::Create($wmiScriptBody)
 
@@ -43,29 +47,31 @@ foreach ($dc in $dcs) {
         & $cmd -namespace 'Root\CIMV2' `
             -operation add -account $acct `
             -permissionsString 'Enable,MethodExecute,RemoteAccess' `
-            -allowInherit $true
+            -allowInherit $true -logPath $log
 
         # Root\MicrosoftActiveDirectory
         & $cmd -namespace 'Root\MicrosoftActiveDirectory' `
             -operation add -account $acct `
             -permissionsString 'Enable,MethodExecute,RemoteAccess' `
-            -allowInherit $true
+            -allowInherit $true -logPath $log
 
         # Root\directory
         & $cmd -namespace 'Root\directory' `
             -operation add -account $acct `
             -permissionsString 'Enable,MethodExecute,RemoteAccess' `
-            -allowInherit $true
+            -allowInherit $true -logPath $log
 
         # Root\MicrosoftDFS
         & $cmd -namespace 'Root\MicrosoftDFS' `
             -operation add -account $acct `
             -permissionsString 'Enable,MethodExecute,RemoteAccess' `
-            -allowInherit $true
+            -allowInherit $true -logPath $log
 
         # Service Control Manager — grant SC_MANAGER_ENUMERATE_SERVICE for Win32_Service
         $scmCmd = [scriptblock]::Create($scmScriptBody)
-        & $scmCmd -operation add -account $acct
+        & $scmCmd -operation add -account $acct -logPath $log
 
-    } -ArgumentList $account, $setWmiAcl.ToString(), $setScmAcl.ToString()
+    } -ArgumentList $account, $setWmiAcl.ToString(), $setScmAcl.ToString(), $logPath
 }
+
+Write-Host "`nDone. Log file: $logPath" -ForegroundColor Green

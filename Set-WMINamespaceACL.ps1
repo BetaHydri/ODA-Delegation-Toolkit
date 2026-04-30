@@ -36,11 +36,21 @@ param (
   [parameter(Position = 3)][string] $permissionsString = $null,
   [bool] $allowInherit = $true,
   [bool] $deny = $false,
-  [string] $computerName = "."
+  [string] $computerName = ".",
+  [string] $logPath = $null
 )
 
 process {
   $ErrorActionPreference = "Stop"
+
+  # --- helper: append a timestamped line to the log file ---
+  function Write-Log ([string]$message) {
+    $entry = "[{0:yyyy-MM-dd HH:mm:ss}] [WMI] [{1}] {2}" -f (Get-Date), $env:COMPUTERNAME, $message
+    Write-Verbose $entry
+    if ($logPath) {
+      $entry | Out-File -FilePath $logPath -Append -Encoding utf8
+    }
+  }
 
   # --- helper: convert permission strings to access mask ---
   function Get-AccessMaskFromPermission([string[]]$permissions) {
@@ -101,6 +111,8 @@ process {
   catch {
     throw "Account was not found: $account ($_)"
   }
+
+  Write-Log "Operation='$operation' Namespace='$namespace' Account='$account' SID='$($sid.Value)' Computer='$computerName' Deny=$deny Inherit=$allowInherit Permissions='$permissionsString'"
 
   # --- CIM params ---
   $cimParams = @{ Namespace = $namespace }
@@ -185,5 +197,7 @@ process {
 
   if ($session) { Remove-CimSession $session }
 
-  Write-Host "Successfully applied '$operation' for account '$account' on namespace '$namespace'."
+  $successMsg = "Successfully applied '$operation' for account '$account' on namespace '$namespace'."
+  Write-Log $successMsg
+  Write-Host $successMsg
 }

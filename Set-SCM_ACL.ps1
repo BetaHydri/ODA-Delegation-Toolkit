@@ -70,11 +70,22 @@ param (
 
     [bool]$deny = $false,
 
-    [string]$computerName = '.'
+    [string]$computerName = '.',
+
+    [string]$logPath = $null
 )
 
 process {
     $ErrorActionPreference = 'Stop'
+
+    # --- helper: append a timestamped line to the log file ---
+    function Write-Log ([string]$message) {
+        $entry = '[{0:yyyy-MM-dd HH:mm:ss}] [SCM] [{1}] {2}' -f (Get-Date), $env:COMPUTERNAME, $message
+        Write-Verbose $entry
+        if ($logPath) {
+            $entry | Out-File -FilePath $logPath -Append -Encoding utf8
+        }
+    }
 
     # --- Resolve account to SID ---
     if ($account.Contains('\')) {
@@ -112,6 +123,8 @@ process {
     }
 
     $sidString = $sid.Value
+
+    Write-Log "Operation='$operation' Account='$account' SID='$sidString' Computer='$computerName' Deny=$deny"
 
     # --- Determine target for sc.exe ---
     $isRemote = $computerName -ne '.' -and
@@ -176,6 +189,7 @@ process {
 
             if ($existingAce) {
                 Write-Warning "ACE for '$account' ($sidString) already exists in SCM DACL. Skipping add."
+                Write-Log "SKIPPED: ACE already exists for '$account' ($sidString)"
                 return
             }
 
@@ -198,10 +212,11 @@ process {
 
             if ($removed -eq 0) {
                 Write-Warning "No ACE found for '$account' ($sidString) in SCM DACL."
+                Write-Log "SKIPPED: No ACE found for '$account' ($sidString)"
                 return
             }
 
-            Write-Verbose "Removed $removed ACE(s) for '$account'."
+            Write-Log "Removed $removed ACE(s) for '$account' ($sidString)"
         }
     }
 
@@ -221,11 +236,13 @@ process {
         throw "sc.exe sdset scmanager failed (exit code $LASTEXITCODE): $sdSetOutput"
     }
 
-    Write-Host "Successfully applied '$operation' for account '$account' on SCM of '$computerName'."
+    $successMsg = "Successfully applied '$operation' for account '$account' on SCM of '$computerName'."
+    Write-Log $successMsg
+    Write-Host $successMsg
 
     # Show resulting SCM DACL in human-readable form
     $resultSddl = (& sc.exe $(if ($scTarget) { $scTarget }) sdshow scmanager 2>&1 |
         Where-Object { $_ -match '^[DOS]:' }) -join ''
     ConvertFrom-SddlString $resultSddl |
-        Select-Object -ExpandProperty DiscretionaryAcl
+    Select-Object -ExpandProperty DiscretionaryAcl
 }
