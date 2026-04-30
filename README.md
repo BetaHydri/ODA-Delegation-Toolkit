@@ -137,13 +137,12 @@ Manages the **Service Control Manager (SCM)** security descriptor to grant or re
 | `-deny`        | No       | `$false`| Create a deny ACE instead of allow                            |
 | `-computerName`| No       | `.`     | Target computer (`.` = local)                                 |
 
-### SCM permissions granted
+### SCM permissions granted (least privilege)
 
-| Right                          | Hex        | Purpose                              |
-|--------------------------------|------------|--------------------------------------|
-| `SC_MANAGER_CONNECT`           | `0x0001`   | Connect to the SCM                   |
-| `SC_MANAGER_ENUMERATE_SERVICE` | `0x0004`   | Enumerate services                   |
-| `STANDARD_RIGHTS_READ`         | `0x20000`  | Read the SCM security descriptor     |
+| Right                          | Hex       | SDDL | Purpose                              |
+|--------------------------------|-----------|------|--------------------------------------|
+| `SC_MANAGER_CONNECT`           | `0x0001`  | `CC` | Connect to the SCM                   |
+| `SC_MANAGER_ENUMERATE_SERVICE` | `0x0004`  | `LC` | Enumerate services                   |
 
 ### Examples
 

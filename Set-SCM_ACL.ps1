@@ -149,10 +149,10 @@ process {
 
     switch ($operation) {
         'add' {
-            # SC_MANAGER_CONNECT (0x0001) + SC_MANAGER_ENUMERATE_SERVICE (0x0004)
-            # + STANDARD_RIGHTS_READ (0x20000) = 0x20005
-            # This matches the typical (CC)(LC)(RC) SDDL rights
-            $accessMask = 0x20005
+            # SC_MANAGER_CONNECT (0x0001) + SC_MANAGER_ENUMERATE_SERVICE (0x0004) = 0x0005
+            # This is the minimum needed for Win32_Service enumeration (least privilege)
+            # SDDL rights: CC (Connect) + LC (Enumerate)
+            $accessMask = 0x0005
 
             $aceFlags = [System.Security.AccessControl.AceFlags]::None
 
