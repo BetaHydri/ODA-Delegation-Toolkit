@@ -35,43 +35,58 @@ $setScmAcl = [scriptblock]::Create((Get-Content -Path '.\Set-SCM_ACL.ps1' -Raw))
 
 Write-Host "Logging to: $logPath" -ForegroundColor Cyan
 
+# Helper: append a timestamped line to the local log file
+function Write-Log ([string]$message) {
+    $entry = '[{0:yyyy-MM-dd HH:mm:ss}] {1}' -f (Get-Date), $message
+    $entry | Out-File -FilePath $logPath -Append -Encoding utf8
+}
+
 foreach ($dc in $dcs) {
     Write-Host $dc -ForegroundColor Yellow
+    Write-Log "--- Processing DC: $dc ---"
 
-    Invoke-Command -ComputerName $dc -ScriptBlock {
-        param ($acct, $wmiScriptBody, $scmScriptBody, $log)
+    try {
+        Invoke-Command -ComputerName $dc -ScriptBlock {
+            param ($acct, $wmiScriptBody, $scmScriptBody)
 
-        $cmd = [scriptblock]::Create($wmiScriptBody)
+            $cmd = [scriptblock]::Create($wmiScriptBody)
 
-        # Root\CIMV2
-        & $cmd -namespace 'Root\CIMV2' `
-            -operation add -account $acct `
-            -permissionsString 'Enable,MethodExecute,RemoteAccess' `
-            -allowInherit $true -logPath $log
+            # Root\CIMV2
+            & $cmd -namespace 'Root\CIMV2' `
+                -operation add -account $acct `
+                -permissionsString 'Enable,MethodExecute,RemoteAccess' `
+                -allowInherit $true
 
-        # Root\MicrosoftActiveDirectory
-        & $cmd -namespace 'Root\MicrosoftActiveDirectory' `
-            -operation add -account $acct `
-            -permissionsString 'Enable,MethodExecute,RemoteAccess' `
-            -allowInherit $true -logPath $log
+            # Root\MicrosoftActiveDirectory
+            & $cmd -namespace 'Root\MicrosoftActiveDirectory' `
+                -operation add -account $acct `
+                -permissionsString 'Enable,MethodExecute,RemoteAccess' `
+                -allowInherit $true
 
-        # Root\directory
-        & $cmd -namespace 'Root\directory' `
-            -operation add -account $acct `
-            -permissionsString 'Enable,MethodExecute,RemoteAccess' `
-            -allowInherit $true -logPath $log
+            # Root\directory
+            & $cmd -namespace 'Root\directory' `
+                -operation add -account $acct `
+                -permissionsString 'Enable,MethodExecute,RemoteAccess' `
+                -allowInherit $true
 
-        # Root\MicrosoftDFS
-        & $cmd -namespace 'Root\MicrosoftDFS' `
-            -operation add -account $acct `
-            -permissionsString 'Enable,MethodExecute,RemoteAccess' `
-            -allowInherit $true -logPath $log
+            # Root\MicrosoftDFS
+            & $cmd -namespace 'Root\MicrosoftDFS' `
+                -operation add -account $acct `
+                -permissionsString 'Enable,MethodExecute,RemoteAccess' `
+                -allowInherit $true
 
-        # Service Control Manager — grant SC_MANAGER_ENUMERATE_SERVICE for Win32_Service
-        $scmCmd = [scriptblock]::Create($scmScriptBody)
-        & $scmCmd -operation add -account $acct -logPath $log
+            # Service Control Manager — grant SC_MANAGER_ENUMERATE_SERVICE for Win32_Service
+            $scmCmd = [scriptblock]::Create($scmScriptBody)
+            & $scmCmd -operation add -account $acct
 
-    } -ArgumentList $account, $setWmiAcl.ToString(), $setScmAcl.ToString(), $logPath
+        } -ArgumentList $account, $setWmiAcl.ToString(), $setScmAcl.ToString()
+
+        Write-Log "[OK]  $dc — WMI namespaces (CIMV2, MicrosoftActiveDirectory, directory, MicrosoftDFS) + SCM for '$account'"
+    }
+    catch {
+        Write-Host "  ERROR: $_" -ForegroundColor Red
+        Write-Log "[ERR] $dc — $($_.Exception.Message)"
+    }
 }
 
 Write-Host "`nDone. Log file: $logPath" -ForegroundColor Green
