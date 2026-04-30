@@ -88,11 +88,11 @@ foreach ($dc in $dcs) {
             Write-Log "      $text"
         }
 
-        Write-Log "[OK]  $dc — WMI namespaces (CIMV2, MicrosoftActiveDirectory, directory, MicrosoftDFS) + SCM for '$account'"
+        Write-Log "[OK]  $dc - WMI namespaces (CIMV2, MicrosoftActiveDirectory, directory, MicrosoftDFS) + SCM for '$account'"
     }
     catch {
         Write-Host "  ERROR: $_" -ForegroundColor Red
-        Write-Log "[ERR] $dc — $($_.Exception.Message)"
+        Write-Log "[ERR] $dc - $($_.Exception.Message)"
     }
 }
 
