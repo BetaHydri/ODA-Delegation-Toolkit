@@ -46,7 +46,7 @@ foreach ($dc in $dcs) {
     Write-Log "--- Processing DC: $dc ---"
 
     try {
-        Invoke-Command -ComputerName $dc -ScriptBlock {
+        $output = Invoke-Command -ComputerName $dc -ScriptBlock {
             param ($acct, $wmiScriptBody, $scmScriptBody)
 
             $cmd = [scriptblock]::Create($wmiScriptBody)
@@ -79,7 +79,14 @@ foreach ($dc in $dcs) {
             $scmCmd = [scriptblock]::Create($scmScriptBody)
             & $scmCmd -operation add -account $acct
 
-        } -ArgumentList $account, $setWmiAcl.ToString(), $setScmAcl.ToString()
+        } -ArgumentList $account, $setWmiAcl.ToString(), $setScmAcl.ToString() *>&1
+
+        # Display and log all remote output
+        foreach ($line in $output) {
+            $text = $line.ToString()
+            Write-Host "  $text"
+            Write-Log "      $text"
+        }
 
         Write-Log "[OK]  $dc — WMI namespaces (CIMV2, MicrosoftActiveDirectory, directory, MicrosoftDFS) + SCM for '$account'"
     }

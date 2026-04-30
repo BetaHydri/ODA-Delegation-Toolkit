@@ -271,7 +271,8 @@ process {
             }
             $type = if ($ace.AceQualifier -eq [System.Security.AccessControl.AceQualifier]::AccessAllowed) {
                 'Allow'
-            } else {
+            }
+            else {
                 'Deny'
             }
             $mask = $ace.AccessMask
