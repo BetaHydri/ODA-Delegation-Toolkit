@@ -87,8 +87,16 @@ process {
   }
 
   try {
-    $ntAccount = New-Object System.Security.Principal.NTAccount($domain, $accountName)
-    $sid = $ntAccount.Translate([System.Security.Principal.SecurityIdentifier])
+    # Try two-part resolution first (DOMAIN\User), fall back to single-part
+    # for BUILTIN groups (e.g. IIS_IUSRS) that only resolve by name alone
+    try {
+      $ntAccount = New-Object System.Security.Principal.NTAccount($domain, $accountName)
+      $sid = $ntAccount.Translate([System.Security.Principal.SecurityIdentifier])
+    }
+    catch {
+      $ntAccount = New-Object System.Security.Principal.NTAccount($accountName)
+      $sid = $ntAccount.Translate([System.Security.Principal.SecurityIdentifier])
+    }
   }
   catch {
     throw "Account was not found: $account ($_)"

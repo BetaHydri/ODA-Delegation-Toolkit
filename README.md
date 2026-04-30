@@ -4,9 +4,30 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows-0078D6?logo=windows&logoColor=white)](https://www.microsoft.com/windows)
 
-Manage WMI namespace security (DACL) from the command line. Add or remove access control entries for local or domain accounts on any WMI namespace — locally or remotely.
+Manage WMI namespace security (DACL) and Service Control Manager (SCM) permissions from the command line. Add or remove access control entries for local or domain accounts — locally or remotely.
 
-## Features
+These scripts are essential for **ODA Active Directory Assessment least-privilege delegation**, enabling a non-Domain Admin / non-Enterprise Admin service account to query WMI and SCM on domain controllers.
+
+## Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `Set-WMINamespaceACL.ps1` | Add or remove ACEs on any WMI namespace DACL |
+| `Set-SCM_ACL.ps1` | Add or remove ACEs on the Service Control Manager DACL |
+| `Process-DCs.ps1` | Orchestration script — loops through all DCs and applies both WMI and SCM ACLs |
+
+## Why Two Scripts?
+
+`Win32_Service` WMI queries go through **two** security layers:
+
+1. **WMI namespace ACL** (`Root\CIMV2`) — checked first by the WMI provider
+2. **Service Control Manager DACL** — checked second when the provider calls `EnumServicesStatus`
+
+If the WMI namespace grants access but the SCM denies `SC_MANAGER_ENUMERATE_SERVICE`, the query fails with _Access Denied_ — even though other `Root\CIMV2` classes like `Win32_BIOS` work fine. `Set-SCM_ACL.ps1` solves this by granting the minimum SCM permissions needed.
+
+## Set-WMINamespaceACL.ps1
+
+### Features
 
 - **Add** allow or deny ACEs with granular WMI permissions
 - **Delete** all ACEs for a given account
@@ -14,7 +35,7 @@ Manage WMI namespace security (DACL) from the command line. Add or remove access
 - Compatible with **PowerShell 5.1** and **7.x**
 - Uses `.NET RawSecurityDescriptor` and `ManagementObject` to avoid known CIM/WMI serialization issues
 
-## Available Permissions
+### Available Permissions
 
 Use these strings (case-insensitive) with the `-permissionsString` parameter, separated by commas.
 
@@ -32,7 +53,7 @@ Use these strings (case-insensitive) with the `-permissionsString` parameter, se
 > **Tip:** For typical monitoring or remote query scenarios, use `"Enable,MethodExecute,RemoteAccess"`.
 > For full administrative access, combine all permissions.
 
-## Parameters
+### Parameters
 
 | Parameter           | Required | Default | Description                                           |
 |---------------------|----------|---------|-------------------------------------------------------|
@@ -44,9 +65,9 @@ Use these strings (case-insensitive) with the `-permissionsString` parameter, se
 | `-deny`             | No       | `$false`| Create a deny ACE instead of allow                     |
 | `-computerName`     | No       | `.`     | Target computer (`.` = local)                          |
 
-## Examples
+### Examples
 
-### Add ACL — grant basic remote access to a local group
+#### Add ACL — grant basic remote access to a local group
 
 ```powershell
 .\Set-WMINamespaceACL.ps1 -namespace "Root\CIMV2" `
@@ -56,7 +77,7 @@ Use these strings (case-insensitive) with the `-permissionsString` parameter, se
     -allowInherit $true
 ```
 
-### Add ACL — grant full access to a domain service account (no inheritance)
+#### Add ACL — grant full access to a domain service account (no inheritance)
 
 ```powershell
 .\Set-WMINamespaceACL.ps1 -namespace "Root\CIMV2" `
@@ -66,7 +87,7 @@ Use these strings (case-insensitive) with the `-permissionsString` parameter, se
     -allowInherit $false
 ```
 
-### Add ACL — deny remote access for a domain group
+#### Add ACL — deny remote access for a domain group
 
 ```powershell
 .\Set-WMINamespaceACL.ps1 -namespace "Root\CIMV2" `
@@ -76,7 +97,7 @@ Use these strings (case-insensitive) with the `-permissionsString` parameter, se
     -deny $true
 ```
 
-### Add ACL — grant access on a remote computer
+#### Add ACL — grant access on a remote computer
 
 ```powershell
 .\Set-WMINamespaceACL.ps1 -namespace "Root\CIMV2" `
@@ -86,7 +107,7 @@ Use these strings (case-insensitive) with the `-permissionsString` parameter, se
     -computerName "SERVER01"
 ```
 
-### Delete ACL — remove all ACEs for a local user
+#### Delete ACL — remove all ACEs for a local user
 
 ```powershell
 .\Set-WMINamespaceACL.ps1 -namespace "Root\CIMV2" `
@@ -94,7 +115,7 @@ Use these strings (case-insensitive) with the `-permissionsString` parameter, se
     -account ".\gast"
 ```
 
-### Delete ACL — remove all ACEs for a domain user on a remote computer
+#### Delete ACL — remove all ACEs for a domain user on a remote computer
 
 ```powershell
 .\Set-WMINamespaceACL.ps1 -namespace "Root\CIMV2" `
@@ -103,11 +124,59 @@ Use these strings (case-insensitive) with the `-permissionsString` parameter, se
     -computerName "SERVER01"
 ```
 
+## Set-SCM_ACL.ps1
+
+Manages the **Service Control Manager (SCM)** security descriptor to grant or revoke `SC_MANAGER_CONNECT` and `SC_MANAGER_ENUMERATE_SERVICE` permissions. This is required when `Win32_Service` WMI queries fail due to hardened SCM ACLs — even though `Root\CIMV2` namespace access is correctly configured.
+
+### Parameters
+
+| Parameter      | Required | Default | Description                                                  |
+|----------------|----------|---------|--------------------------------------------------------------|
+| `-operation`   | Yes      | —       | `add` or `delete`                                            |
+| `-account`     | Yes      | —       | Account in `DOMAIN\User`, `.\User`, or `user@domain` format |
+| `-deny`        | No       | `$false`| Create a deny ACE instead of allow                            |
+| `-computerName`| No       | `.`     | Target computer (`.` = local)                                 |
+
+### SCM permissions granted
+
+| Right                          | Hex        | Purpose                              |
+|--------------------------------|------------|--------------------------------------|
+| `SC_MANAGER_CONNECT`           | `0x0001`   | Connect to the SCM                   |
+| `SC_MANAGER_ENUMERATE_SERVICE` | `0x0004`   | Enumerate services                   |
+| `STANDARD_RIGHTS_READ`         | `0x20000`  | Read the SCM security descriptor     |
+
+### Examples
+
+#### Add — grant SCM enumerate access for a domain group
+
+```powershell
+.\Set-SCM_ACL.ps1 -operation add -account "DOMAIN\MonitoringGroup" -computerName "SERVER01"
+```
+
+#### Delete — remove all SCM ACEs for an account
+
+```powershell
+.\Set-SCM_ACL.ps1 -operation delete -account "DOMAIN\MonitoringGroup" -computerName "SERVER01"
+```
+
+## Process-DCs.ps1
+
+Orchestration script that loops through a list of domain controllers and applies both WMI namespace ACLs and SCM DACL entries for a service account. Targets the following namespaces:
+
+- `Root\CIMV2`
+- `Root\MicrosoftActiveDirectory`
+- `Root\directory`
+- `Root\MicrosoftDFS`
+
+Plus the SCM DACL for `Win32_Service` access.
+
+Edit the `$account` and `$dcs` variables at the top of the script to match your environment.
+
 ## Prerequisites
 
 - Windows OS
 - PowerShell 5.1 or 7.x
-- **Administrator** privileges (required to modify WMI namespace security)
+- **Administrator** privileges (required to modify WMI namespace security and SCM DACL)
 
 ## License
 
