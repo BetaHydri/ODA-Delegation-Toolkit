@@ -115,8 +115,8 @@ process {
 
     # --- Determine target for sc.exe ---
     $isRemote = $computerName -ne '.' -and
-                $computerName -ne 'localhost' -and
-                $computerName -ne $env:COMPUTERNAME
+    $computerName -ne 'localhost' -and
+    $computerName -ne $env:COMPUTERNAME
     $scTarget = if ($isRemote) { "\\$computerName" } else { $null }
 
     # --- Get current SCM SDDL ---
@@ -222,4 +222,10 @@ process {
     }
 
     Write-Host "Successfully applied '$operation' for account '$account' on SCM of '$computerName'."
+
+    # Show resulting SCM DACL in human-readable form
+    $resultSddl = (& sc.exe $(if ($scTarget) { $scTarget }) sdshow scmanager 2>&1 |
+        Where-Object { $_ -match '^[DOS]:' }) -join ''
+    ConvertFrom-SddlString $resultSddl |
+        Select-Object -ExpandProperty DiscretionaryAcl
 }
