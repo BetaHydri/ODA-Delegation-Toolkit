@@ -64,6 +64,7 @@ Use these strings (case-insensitive) with the `-permissionsString` parameter, se
 | `-allowInherit`     | No       | `$true` | Apply ACE to child namespaces via ContainerInherit     |
 | `-deny`             | No       | `$false`| Create a deny ACE instead of allow                     |
 | `-computerName`     | No       | `.`     | Target computer (`.` = local)                          |
+| `-logPath`           | No       | `$null` | Path to a log file for timestamped change entries       |
 
 ### Examples
 
@@ -136,6 +137,7 @@ Manages the **Service Control Manager (SCM)** security descriptor to grant or re
 | `-account`     | Yes      | —       | Account in `DOMAIN\User`, `.\User`, or `user@domain` format |
 | `-deny`        | No       | `$false`| Create a deny ACE instead of allow                            |
 | `-computerName`| No       | `.`     | Target computer (`.` = local)                                 |
+| `-logPath`     | No       | `$null` | Path to a log file for timestamped change entries              |
 
 ### SCM permissions granted (least privilege)
 
@@ -144,9 +146,9 @@ Manages the **Service Control Manager (SCM)** security descriptor to grant or re
 | `SC_MANAGER_CONNECT`           | `0x0001`  | `CC` | Connect to the SCM                   |
 | `SC_MANAGER_ENUMERATE_SERVICE` | `0x0004`  | `LC` | Enumerate services                   |
 
-### Examples
+After each operation, `Set-SCM_ACL.ps1` displays the resulting SCM DACL with actual SCM permission names (e.g. `SC_MANAGER_CONNECT`, `SC_MANAGER_ENUMERATE_SERVICE`) instead of generic file system labels.
 
-#### Add — grant SCM enumerate access for a domain group
+### Examples
 
 ```powershell
 .\Set-SCM_ACL.ps1 -operation add -account "DOMAIN\MonitoringGroup" -computerName "SERVER01"
@@ -170,6 +172,14 @@ Orchestration script that loops through a list of domain controllers and applies
 Plus the SCM DACL for `Win32_Service` access.
 
 Edit the `$account` and `$dcs` variables at the top of the script to match your environment.
+
+### Logging
+
+`Process-DCs.ps1` creates a timestamped log file (`ACL-Changes_yyyyMMdd_HHmmss.log`) in the script directory on the **admin server** where it runs. The log captures:
+
+- All remote output (WMI success messages, SCM DACL listings with permission names)
+- `[OK]` or `[ERR]` status per domain controller
+- Timestamps for every entry
 
 ## Prerequisites
 

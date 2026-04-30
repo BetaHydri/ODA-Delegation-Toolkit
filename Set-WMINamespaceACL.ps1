@@ -159,6 +159,27 @@ process {
         $qualifier = [System.Security.AccessControl.AceQualifier]::AccessAllowed
       }
 
+      # Check if an ACE for this SID with same qualifier and access mask already exists
+      $existingAce = $null
+      for ($i = 0; $i -lt $rawSD.DiscretionaryAcl.Count; $i++) {
+        $ace = $rawSD.DiscretionaryAcl[$i]
+        if ($ace -is [System.Security.AccessControl.CommonAce] -and
+            $ace.SecurityIdentifier -eq $sid -and
+            $ace.AceQualifier -eq $qualifier -and
+            $ace.AccessMask -eq $accessMask) {
+          $existingAce = $ace
+          break
+        }
+      }
+
+      if ($existingAce) {
+        $skipMsg = "ACE for '$account' ($($sid.Value)) already exists on '$namespace' with same permissions. Skipping add."
+        Write-Warning $skipMsg
+        Write-Log "SKIPPED: $skipMsg"
+        if ($session) { Remove-CimSession $session }
+        return
+      }
+
       $newAce = New-Object System.Security.AccessControl.CommonAce(
         $aceFlags, $qualifier, [int]$accessMask, $sid, $false, $null)
 
@@ -171,12 +192,24 @@ process {
       }
 
       # Remove all ACEs for this SID (iterate backwards to avoid index shift)
+      $removed = 0
       for ($i = $rawSD.DiscretionaryAcl.Count - 1; $i -ge 0; $i--) {
         $ace = $rawSD.DiscretionaryAcl[$i]
         if ($ace -is [System.Security.AccessControl.CommonAce] -and $ace.SecurityIdentifier -eq $sid) {
           $rawSD.DiscretionaryAcl.RemoveAce($i)
+          $removed++
         }
       }
+
+      if ($removed -eq 0) {
+        $skipMsg = "No ACE found for '$account' ($($sid.Value)) on '$namespace'."
+        Write-Warning $skipMsg
+        Write-Log "SKIPPED: $skipMsg"
+        if ($session) { Remove-CimSession $session }
+        return
+      }
+
+      Write-Log "Removed $removed ACE(s) for '$account' ($($sid.Value)) on '$namespace'"
     }
   }
 
