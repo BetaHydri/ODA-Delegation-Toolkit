@@ -4,8 +4,8 @@
 
 .DESCRIPTION
     Loops through a list of domain controllers and remotely invokes Set-WMINamespaceACL.ps1
-    to add WMI ACEs for a service account on Root\CIMV2, Root\MicrosoftActiveDirectory,
-    Root\directory, and Root\MicrosoftDFS namespaces.
+    to add WMI ACEs for a service account on Root\CIMV2, Root\default, Root\MicrosoftActiveDirectory,
+    Root\directory, Root\MicrosoftDFS, and Root\MicrosoftDNS namespaces.
     Additionally sets Service Control Manager (SCM) DACL via Set-SCM_ACL.ps1 to grant
     SC_MANAGER_ENUMERATE_SERVICE, which is required for Win32_Service queries.
     All changes are logged to a timestamped log file in the script directory.
@@ -57,6 +57,12 @@ foreach ($dc in $dcs) {
                 -permissionsString 'Enable,MethodExecute,RemoteAccess' `
                 -allowInherit $true
 
+            # Root\default — StdRegProv (remote registry); gates Sirona "Registry Check" prereq
+            & $cmd -namespace 'Root\default' `
+                -operation add -account $acct `
+                -permissionsString 'Enable,MethodExecute,RemoteAccess' `
+                -allowInherit $true
+
             # Root\MicrosoftActiveDirectory
             & $cmd -namespace 'Root\MicrosoftActiveDirectory' `
                 -operation add -account $acct `
@@ -75,6 +81,12 @@ foreach ($dc in $dcs) {
                 -permissionsString 'Enable,MethodExecute,RemoteAccess' `
                 -allowInherit $true
 
+            # Root\MicrosoftDNS — DNS server config, zones, forwarders (only present on DCs with DNS Server role)
+            & $cmd -namespace 'Root\MicrosoftDNS' `
+                -operation add -account $acct `
+                -permissionsString 'Enable,MethodExecute,RemoteAccess' `
+                -allowInherit $true
+
             # Service Control Manager — grant SC_MANAGER_ENUMERATE_SERVICE for Win32_Service
             $scmCmd = [scriptblock]::Create($scmScriptBody)
             & $scmCmd -operation add -account $acct
@@ -88,7 +100,7 @@ foreach ($dc in $dcs) {
             Write-Log "      $text"
         }
 
-        Write-Log "[OK]  $dc - WMI namespaces (CIMV2, MicrosoftActiveDirectory, directory, MicrosoftDFS) + SCM for '$account'"
+        Write-Log "[OK]  $dc - WMI namespaces (CIMV2, default, MicrosoftActiveDirectory, directory, MicrosoftDFS, MicrosoftDNS) + SCM for '$account'"
     }
     catch {
         Write-Host "  ERROR: $_" -ForegroundColor Red
