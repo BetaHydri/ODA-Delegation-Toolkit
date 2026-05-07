@@ -33,6 +33,36 @@ ODA AD Assessment collectors query multiple security layers on each domain contr
 
 Each script addresses one layer independently and is idempotent — running `add` when the ACE already exists will skip with a warning.
 
+## Step-by-step execution order
+
+You can either run `Process-DCs.ps1` (which orchestrates everything automatically) or execute the scripts manually in the order below.
+
+### Option A — Automated (recommended)
+
+Edit the variables at the top of `Process-DCs.ps1` (`$account`, `$dcs`, `$domainNCs`, `$configNC`, `$domainToDC`), then run:
+
+```powershell
+.\Process-DCs.ps1 -operation add
+```
+
+### Option B — Manual, step by step
+
+Run the scripts in this order from an admin workstation with Domain Admin or equivalent privileges.
+
+| Step | Script | Where to run | How often | What it does |
+| ---- | ------ | ------------ | --------- | ------------ |
+| 1 | `Set-ADConvergenceRights.ps1` | Admin workstation | Once per forest | Grants "Replicating Directory Changes" on all domain NCs |
+| 2 | `Set-SYSVOLWriteAccess.ps1` | Admin workstation | Once per domain | Grants NTFS Modify on the SYSVOL domain root (DFS-R replicates the ACL) |
+| 3 | `Set-DfsrReadAccess.ps1` | Admin workstation | Once per forest | Grants Read on DFSR-GlobalSettings and CN=Sites (NTDS Settings) |
+| 4 | `Set-WMINamespaceACL.ps1` | Each DC (locally or remotely) | Once per DC | Grants WMI namespace access on all required namespaces |
+| 5 | `Set-SCM_ACL.ps1` | Each DC (locally or remotely) | Once per DC | Grants SCM enumerate rights for `Win32_Service` queries |
+| 6 | `Set-NetlogonPermissions.ps1` | Each DC (locally) | Once per DC | Grants NTFS Read on `netlogon.dns` and `netlogon.log` |
+
+> **Steps 1–3** are AD-level / domain-level delegations — they only need to run once.
+> **Steps 4–6** are per-DC settings — they must be applied on every domain controller.
+
+To **revoke** all permissions, run the same scripts in reverse order with `-operation delete`.
+
 ## Set-WMINamespaceACL.ps1
 
 ### Features
