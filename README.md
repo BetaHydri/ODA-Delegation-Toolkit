@@ -11,7 +11,7 @@ These scripts are essential for **ODA Active Directory Assessment least-privileg
 ## Scripts
 
 | Script | Purpose | Scope |
-|--------|---------|-------|
+| ------ | ------- | ----- |
 | `Set-WMINamespaceACL.ps1` | Add or remove ACEs on any WMI namespace DACL | Per DC |
 | `Set-SCM_ACL.ps1` | Add or remove ACEs on the Service Control Manager DACL | Per DC |
 | `Set-NetlogonPermissions.ps1` | Add or remove NTFS Read ACEs on `netlogon.dns` and `netlogon.log` | Per DC |
@@ -45,34 +45,34 @@ Each script addresses one layer independently and is idempotent — running `add
 
 Use these strings (case-insensitive) with the `-permissionsString` parameter, separated by commas.
 
-| Permission String | WMI Constant            | Hex        | Description                                                        |
-|-------------------|-------------------------|------------|--------------------------------------------------------------------|
-| `Enable`          | WBEM_ENABLE             | `0x00001`  | Grants read access to WMI objects (instances, classes, enumerations) |
-| `MethodExecute`   | WBEM_METHOD_EXECUTE     | `0x00002`  | Allows execution of WMI provider methods                            |
-| `FullWrite`       | WBEM_FULL_WRITE_REP     | `0x00004`  | Allows writing to static WMI repository classes and instances       |
-| `PartialWrite`    | WBEM_PARTIAL_WRITE_REP  | `0x00008`  | Allows writing to dynamic WMI provider objects                      |
-| `ProviderWrite`   | WBEM_WRITE_PROVIDER     | `0x00010`  | Allows writing of classes and instances to WMI providers             |
-| `RemoteAccess`    | WBEM_REMOTE_ACCESS      | `0x00020`  | Allows remote access to the namespace (DCOM/WinRM)                  |
-| `ReadSecurity`    | READ_CONTROL            | `0x20000`  | Allows reading the namespace security descriptor                    |
-| `WriteSecurity`   | WRITE_DAC               | `0x40000`  | Allows modifying the namespace security descriptor (DACL)           |
+| Permission String | WMI Constant | Hex | Description |
+| ----------------- | ------------ | --- | ----------- |
+| `Enable` | WBEM_ENABLE | `0x00001` | Grants read access to WMI objects (instances, classes, enumerations) |
+| `MethodExecute` | WBEM_METHOD_EXECUTE | `0x00002` | Allows execution of WMI provider methods |
+| `FullWrite` | WBEM_FULL_WRITE_REP | `0x00004` | Allows writing to static WMI repository classes and instances |
+| `PartialWrite` | WBEM_PARTIAL_WRITE_REP | `0x00008` | Allows writing to dynamic WMI provider objects |
+| `ProviderWrite` | WBEM_WRITE_PROVIDER | `0x00010` | Allows writing of classes and instances to WMI providers |
+| `RemoteAccess` | WBEM_REMOTE_ACCESS | `0x00020` | Allows remote access to the namespace (DCOM/WinRM) |
+| `ReadSecurity` | READ_CONTROL | `0x20000` | Allows reading the namespace security descriptor |
+| `WriteSecurity` | WRITE_DAC | `0x40000` | Allows modifying the namespace security descriptor (DACL) |
 
 > **Tip:** For typical monitoring or remote query scenarios, use `"Enable,MethodExecute,RemoteAccess"`.
 > For full administrative access, combine all permissions.
 
-### Parameters
+### WMI Parameters
 
-| Parameter           | Required | Default | Description                                           |
-|---------------------|----------|---------|-------------------------------------------------------|
-| `-namespace`        | Yes      | —       | WMI namespace path (e.g. `Root\CIMV2`)                |
-| `-operation`        | Yes      | —       | `add` or `delete`                                     |
-| `-account`          | Yes      | —       | Account in `DOMAIN\User`, `.\User`, or `user@domain` format |
-| `-permissionsString`| No       | `$null` | Comma-separated permissions (required for `add`)       |
-| `-allowInherit`     | No       | `$true` | Apply ACE to child namespaces via ContainerInherit     |
-| `-deny`             | No       | `$false`| Create a deny ACE instead of allow                     |
-| `-computerName`     | No       | `.`     | Target computer (`.` = local)                          |
-| `-logPath`           | No       | `$null` | Path to a log file for timestamped change entries       |
+| Parameter | Required | Default | Description |
+| --------- | -------- | ------- | ----------- |
+| `-namespace` | Yes | — | WMI namespace path (e.g. `Root\CIMV2`) |
+| `-operation` | Yes | — | `add` or `delete` |
+| `-account` | Yes | — | Account in `DOMAIN\User`, `.\User`, or `user@domain` format |
+| `-permissionsString` | No | `$null` | Comma-separated permissions (required for `add`) |
+| `-allowInherit` | No | `$true` | Apply ACE to child namespaces via ContainerInherit |
+| `-deny` | No | `$false` | Create a deny ACE instead of allow |
+| `-computerName` | No | `.` | Target computer (`.` = local) |
+| `-logPath` | No | `$null` | Path to a log file for timestamped change entries |
 
-### Examples
+### WMI Examples
 
 #### Add ACL — grant basic remote access to a local group
 
@@ -135,26 +135,26 @@ Use these strings (case-insensitive) with the `-permissionsString` parameter, se
 
 Manages the **Service Control Manager (SCM)** security descriptor to grant or revoke `SC_MANAGER_CONNECT` and `SC_MANAGER_ENUMERATE_SERVICE` permissions. This is required when `Win32_Service` WMI queries fail due to hardened SCM ACLs — even though `Root\CIMV2` namespace access is correctly configured.
 
-### Parameters
+### SCM Parameters
 
-| Parameter      | Required | Default | Description                                                  |
-|----------------|----------|---------|--------------------------------------------------------------|
-| `-operation`   | Yes      | —       | `add` or `delete`                                            |
-| `-account`     | Yes      | —       | Account in `DOMAIN\User`, `.\User`, or `user@domain` format |
-| `-deny`        | No       | `$false`| Create a deny ACE instead of allow                            |
-| `-computerName`| No       | `.`     | Target computer (`.` = local)                                 |
-| `-logPath`     | No       | `$null` | Path to a log file for timestamped change entries              |
+| Parameter | Required | Default | Description |
+| --------- | -------- | ------- | ----------- |
+| `-operation` | Yes | — | `add` or `delete` |
+| `-account` | Yes | — | Account in `DOMAIN\User`, `.\User`, or `user@domain` format |
+| `-deny` | No | `$false` | Create a deny ACE instead of allow |
+| `-computerName` | No | `.` | Target computer (`.` = local) |
+| `-logPath` | No | `$null` | Path to a log file for timestamped change entries |
 
 ### SCM permissions granted (least privilege)
 
-| Right                          | Hex       | SDDL | Purpose                              |
-|--------------------------------|-----------|------|--------------------------------------|
-| `SC_MANAGER_CONNECT`           | `0x0001`  | `CC` | Connect to the SCM                   |
-| `SC_MANAGER_ENUMERATE_SERVICE` | `0x0004`  | `LC` | Enumerate services                   |
+| Right | Hex | SDDL | Purpose |
+| ----- | --- | ---- | ------- |
+| `SC_MANAGER_CONNECT` | `0x0001` | `CC` | Connect to the SCM |
+| `SC_MANAGER_ENUMERATE_SERVICE` | `0x0004` | `LC` | Enumerate services |
 
 After each operation, `Set-SCM_ACL.ps1` displays the resulting SCM DACL with actual SCM permission names (e.g. `SC_MANAGER_CONNECT`, `SC_MANAGER_ENUMERATE_SERVICE`) instead of generic file system labels.
 
-### Examples
+### SCM Examples
 
 ```powershell
 .\Set-SCM_ACL.ps1 -operation add -account "DOMAIN\MonitoringGroup" -computerName "SERVER01"
@@ -170,22 +170,22 @@ After each operation, `Set-SCM_ACL.ps1` displays the resulting SCM DACL with act
 
 Manages NTFS file-level permissions on `netlogon.dns` and `netlogon.log`. This is needed when the ODA service account is a member of Backup Operators (granting C$ share access) but the Sirona collector uses standard .NET file I/O (`System.IO.File.OpenText()`) that does **not** activate `SeBackupPrivilege`.
 
-### Parameters
+### Netlogon Parameters
 
-| Parameter    | Required | Default | Description                                              |
-|--------------|----------|---------|----------------------------------------------------------|
-| `-operation` | Yes      | —       | `add` or `delete`                                        |
-| `-account`   | Yes      | —       | Account in `DOMAIN\User` or `.\User` format             |
-| `-logPath`   | No       | `$null` | Path to a log file for timestamped change entries         |
+| Parameter | Required | Default | Description |
+| --------- | -------- | ------- | ----------- |
+| `-operation` | Yes | — | `add` or `delete` |
+| `-account` | Yes | — | Account in `DOMAIN\User` or `.\User` format |
+| `-logPath` | No | `$null` | Path to a log file for timestamped change entries |
 
 ### Target Files
 
 | File | Path | Purpose |
-|------|------|---------|
+| ---- | ---- | ------- |
 | `netlogon.dns` | `%SystemRoot%\system32\config\netlogon.dns` | DNS registration records |
 | `netlogon.log` | `%SystemRoot%\debug\netlogon.log` | Netlogon debug log |
 
-### Examples
+### Netlogon Examples
 
 ```powershell
 # Grant NTFS Read (run locally on the DC)
@@ -203,16 +203,16 @@ This is a **read-only** replication right — it does **not** grant password rep
 
 > **Scope:** This is a domain-level operation. Run once from an admin workstation, not per DC.
 
-### Parameters
+### Convergence Parameters
 
-| Parameter    | Required | Default | Description                                              |
-|--------------|----------|---------|----------------------------------------------------------|
-| `-operation` | Yes      | —       | `add` or `delete`                                        |
-| `-account`   | Yes      | —       | Account in `DOMAIN\Name` format                          |
-| `-domainNCs` | No       | Placeholder list | Array of domain NC distinguished names          |
-| `-logPath`   | No       | `$null` | Path to a log file for timestamped change entries         |
+| Parameter | Required | Default | Description |
+| --------- | -------- | ------- | ----------- |
+| `-operation` | Yes | — | `add` or `delete` |
+| `-account` | Yes | — | Account in `DOMAIN\Name` format |
+| `-domainNCs` | No | Placeholder list | Array of domain NC distinguished names |
+| `-logPath` | No | `$null` | Path to a log file for timestamped change entries |
 
-### Examples
+### Convergence Examples
 
 ```powershell
 # Grant Replicating Directory Changes on all domain NCs
@@ -228,16 +228,16 @@ Grants or revokes NTFS **Modify** permission on the SYSVOL domain root folder. T
 
 > **Scope:** This is a domain-level operation. Run once per domain on one DC (preferably PDCe) — DFS-R replicates the ACL change to other DCs.
 
-### Parameters
+### SYSVOL Parameters
 
-| Parameter      | Required | Default | Description                                              |
-|----------------|----------|---------|----------------------------------------------------------|
-| `-operation`   | Yes      | —       | `add` or `delete`                                        |
-| `-account`     | Yes      | —       | Account in `DOMAIN\Name` format                          |
-| `-domainToDC`  | No       | Placeholder hashtable | Hashtable mapping domain DNS → one DC FQDN  |
-| `-logPath`     | No       | `$null` | Path to a log file for timestamped change entries         |
+| Parameter | Required | Default | Description |
+| --------- | -------- | ------- | ----------- |
+| `-operation` | Yes | — | `add` or `delete` |
+| `-account` | Yes | — | Account in `DOMAIN\Name` format |
+| `-domainToDC` | No | Placeholder hashtable | Hashtable mapping domain DNS → one DC FQDN |
+| `-logPath` | No | `$null` | Path to a log file for timestamped change entries |
 
-### Examples
+### SYSVOL Examples
 
 ```powershell
 # Grant NTFS Modify on SYSVOL for all domains
