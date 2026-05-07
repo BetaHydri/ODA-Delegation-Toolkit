@@ -10,20 +10,26 @@ These scripts are essential for **ODA Active Directory Assessment least-privileg
 
 ## Scripts
 
-| Script | Purpose |
-|--------|---------|
-| `Set-WMINamespaceACL.ps1` | Add or remove ACEs on any WMI namespace DACL |
-| `Set-SCM_ACL.ps1` | Add or remove ACEs on the Service Control Manager DACL |
-| `Process-DCs.ps1` | Orchestration script — loops through all DCs and applies both WMI and SCM ACLs |
+| Script | Purpose | Scope |
+|--------|---------|-------|
+| `Set-WMINamespaceACL.ps1` | Add or remove ACEs on any WMI namespace DACL | Per DC |
+| `Set-SCM_ACL.ps1` | Add or remove ACEs on the Service Control Manager DACL | Per DC |
+| `Set-NetlogonPermissions.ps1` | Add or remove NTFS Read ACEs on `netlogon.dns` and `netlogon.log` | Per DC |
+| `Set-ADConvergenceRights.ps1` | Grant or revoke "Replicating Directory Changes" on domain naming contexts | Per domain |
+| `Set-SYSVOLWriteAccess.ps1` | Grant or revoke NTFS Modify on the SYSVOL domain root folder | Per domain |
+| `Process-DCs.ps1` | Orchestration script — loops through all DCs and applies WMI, SCM, and Netlogon permissions | All DCs |
 
-## Why Two Scripts?
+## Why Multiple Scripts?
 
-`Win32_Service` WMI queries go through **two** security layers:
+ODA AD Assessment collectors query multiple security layers on each domain controller. A non-Domain Admin service account needs explicit permissions at **every** layer:
 
-1. **WMI namespace ACL** (`Root\CIMV2`) — checked first by the WMI provider
-2. **Service Control Manager DACL** — checked second when the provider calls `EnumServicesStatus`
+1. **WMI namespace ACLs** — `Root\CIMV2`, `Root\default`, `Root\MicrosoftActiveDirectory`, `Root\directory`, `Root\MicrosoftDFS`, `Root\MicrosoftDNS`
+2. **Service Control Manager DACL** — `SC_MANAGER_ENUMERATE_SERVICE` for `Win32_Service` queries
+3. **NTFS file ACLs** — Read access on `netlogon.dns` and `netlogon.log` (Backup Operators grants C$ share access, but standard .NET I/O does not activate `SeBackupPrivilege`)
+4. **AD extended rights** — "Replicating Directory Changes" on each domain NC for convergence testing
+5. **SYSVOL NTFS permissions** — Modify access on the SYSVOL domain root for DFS-R convergence measurement
 
-If the WMI namespace grants access but the SCM denies `SC_MANAGER_ENUMERATE_SERVICE`, the query fails with _Access Denied_ — even though other `Root\CIMV2` classes like `Win32_BIOS` work fine. `Set-SCM_ACL.ps1` solves this by granting the minimum SCM permissions needed.
+Each script addresses one layer independently and is idempotent — running `add` when the ACE already exists will skip with a warning.
 
 ## Set-WMINamespaceACL.ps1
 
@@ -160,26 +166,109 @@ After each operation, `Set-SCM_ACL.ps1` displays the resulting SCM DACL with act
 .\Set-SCM_ACL.ps1 -operation delete -account "DOMAIN\MonitoringGroup" -computerName "SERVER01"
 ```
 
+## Set-NetlogonPermissions.ps1
+
+Manages NTFS file-level permissions on `netlogon.dns` and `netlogon.log`. This is needed when the ODA service account is a member of Backup Operators (granting C$ share access) but the Sirona collector uses standard .NET file I/O (`System.IO.File.OpenText()`) that does **not** activate `SeBackupPrivilege`.
+
+### Parameters
+
+| Parameter    | Required | Default | Description                                              |
+|--------------|----------|---------|----------------------------------------------------------|
+| `-operation` | Yes      | —       | `add` or `delete`                                        |
+| `-account`   | Yes      | —       | Account in `DOMAIN\User` or `.\User` format             |
+| `-logPath`   | No       | `$null` | Path to a log file for timestamped change entries         |
+
+### Target Files
+
+| File | Path | Purpose |
+|------|------|---------|
+| `netlogon.dns` | `%SystemRoot%\system32\config\netlogon.dns` | DNS registration records |
+| `netlogon.log` | `%SystemRoot%\debug\netlogon.log` | Netlogon debug log |
+
+### Examples
+
+```powershell
+# Grant NTFS Read (run locally on the DC)
+.\Set-NetlogonPermissions.ps1 -operation add -account "DOMAIN\ODA-DC-Readers"
+
+# Remove NTFS ACEs
+.\Set-NetlogonPermissions.ps1 -operation delete -account "DOMAIN\ODA-DC-Readers"
+```
+
+## Set-ADConvergenceRights.ps1
+
+Grants or revokes the **"Replicating Directory Changes"** extended right on domain naming contexts. This is required for the ODA AD Convergence collectors (`IPBB_ADREPLICATIONSTATUS_GetADConvergence_Init/_Collect`) that write a test attribute and monitor replication latency.
+
+This is a **read-only** replication right — it does **not** grant password replication ("Replicating Directory Changes All").
+
+> **Scope:** This is a domain-level operation. Run once from an admin workstation, not per DC.
+
+### Parameters
+
+| Parameter    | Required | Default | Description                                              |
+|--------------|----------|---------|----------------------------------------------------------|
+| `-operation` | Yes      | —       | `add` or `delete`                                        |
+| `-account`   | Yes      | —       | Account in `DOMAIN\Name` format                          |
+| `-domainNCs` | No       | Placeholder list | Array of domain NC distinguished names          |
+| `-logPath`   | No       | `$null` | Path to a log file for timestamped change entries         |
+
+### Examples
+
+```powershell
+# Grant Replicating Directory Changes on all domain NCs
+.\Set-ADConvergenceRights.ps1 -operation add -account "CONTOSO\ODA-Assessment-Readers"
+
+# Revoke all delegated rights on all domain NCs
+.\Set-ADConvergenceRights.ps1 -operation delete -account "CONTOSO\ODA-Assessment-Readers"
+```
+
+## Set-SYSVOLWriteAccess.ps1
+
+Grants or revokes NTFS **Modify** permission on the SYSVOL domain root folder. This is required for the ODA SYSVOL Convergence collectors (`IPBB_SYSVOLREPLICATION_Convergence_Init/_Collect`) that create a temporary file in `\\<DC>\SYSVOL\<domain>\` and measure DFS-R replication latency.
+
+> **Scope:** This is a domain-level operation. Run once per domain on one DC (preferably PDCe) — DFS-R replicates the ACL change to other DCs.
+
+### Parameters
+
+| Parameter      | Required | Default | Description                                              |
+|----------------|----------|---------|----------------------------------------------------------|
+| `-operation`   | Yes      | —       | `add` or `delete`                                        |
+| `-account`     | Yes      | —       | Account in `DOMAIN\Name` format                          |
+| `-domainToDC`  | No       | Placeholder hashtable | Hashtable mapping domain DNS → one DC FQDN  |
+| `-logPath`     | No       | `$null` | Path to a log file for timestamped change entries         |
+
+### Examples
+
+```powershell
+# Grant NTFS Modify on SYSVOL for all domains
+.\Set-SYSVOLWriteAccess.ps1 -operation add -account "CONTOSO\ODA-Assessment-Readers"
+
+# Revoke NTFS permissions on SYSVOL for all domains
+.\Set-SYSVOLWriteAccess.ps1 -operation delete -account "CONTOSO\ODA-Assessment-Readers"
+```
+
 ## Process-DCs.ps1
 
-Orchestration script that loops through a list of domain controllers and applies both WMI namespace ACLs and SCM DACL entries for a service account. Targets the following namespaces:
+Orchestration script that loops through a list of domain controllers and remotely applies **per-DC** permissions for a service account:
 
-- `Root\CIMV2`
-- `Root\MicrosoftActiveDirectory`
-- `Root\directory`
-- `Root\MicrosoftDFS`
+- **WMI namespace ACLs** on `Root\CIMV2`, `Root\default`, `Root\MicrosoftActiveDirectory`, `Root\directory`, `Root\MicrosoftDFS`, `Root\MicrosoftDNS`
+- **SCM DACL** for `Win32_Service` access (`SC_MANAGER_CONNECT` + `SC_MANAGER_ENUMERATE_SERVICE`)
+- **NTFS ACLs** on `netlogon.dns` and `netlogon.log`
 
-Plus the SCM DACL for `Win32_Service` access.
+When the target DC is the local machine, the script runs locally to avoid WinRM loopback failures.
 
 Edit the `$account` and `$dcs` variables at the top of the script to match your environment.
 
+> **Note:** `Set-ADConvergenceRights.ps1` and `Set-SYSVOLWriteAccess.ps1` are **not** included in `Process-DCs.ps1` — they are domain-level operations that only need to run once per domain, not per DC.
+
 ### Logging
 
-`Process-DCs.ps1` creates a timestamped log file (`ACL-Changes_yyyyMMdd_HHmmss.log`) in the script directory on the **admin server** where it runs. The log captures:
+`Process-DCs.ps1` creates a timestamped log file (`ACL-Changes_<operation>_yyyyMMdd_HHmmss.log`) in the script directory on the **admin server** where it runs. The log captures:
 
-- All remote output (WMI success messages, SCM DACL listings with permission names)
-- `[OK]` or `[ERR]` status per domain controller
+- All remote output (WMI success messages, SCM DACL listings with permission names, Netlogon file ACLs)
+- `[OK]` or `[ERR]` status per domain controller and per setting
 - Timestamps for every entry
+- Summary counts at the end
 
 ## Prerequisites
 
