@@ -1,9 +1,17 @@
 <#
 .SYNOPSIS
-    Grants or revokes WMI namespace remote access, SCM DACL, and Netlogon file permissions on all domain controllers.
+    Grants or revokes all ODA delegation permissions: per-DC settings and AD-level delegations.
 
 .DESCRIPTION
-    Loops through a list of domain controllers and remotely invokes:
+    Orchestrates the full ODA delegation in two phases:
+
+    Phase 1 — AD-level delegations (run once, affect AD objects):
+    - Set-ADConvergenceRights.ps1 to grant/revoke "Replicating Directory Changes" on domain NCs.
+    - Set-SYSVOLWriteAccess.ps1 to grant/revoke NTFS Modify on SYSVOL domain folders.
+    - Set-DfsrReadAccess.ps1 to grant/revoke Read on DFSR-GlobalSettings containers (per domain)
+      and CN=Sites in the Configuration partition (NTDS Settings objects).
+
+    Phase 2 — Per-DC settings (run on each DC via WinRM):
     - Set-WMINamespaceACL.ps1 to add/remove WMI ACEs for a service account on Root\CIMV2, Root\default,
       Root\MicrosoftActiveDirectory, Root\directory, Root\MicrosoftDFS, and Root\MicrosoftDNS namespaces.
     - Set-SCM_ACL.ps1 to grant/revoke SC_MANAGER_ENUMERATE_SERVICE on the Service Control Manager DACL,
@@ -49,6 +57,29 @@ $dcs = @(
     'DC01.child5.contoso.com', 'DC02.child5.contoso.com'             # child5.contoso.com
 )
 
+# AD-level delegation parameters
+$domainNCs = @(
+    'DC=contoso,DC=com',
+    'DC=child1,DC=contoso,DC=com',
+    'DC=child2,DC=contoso,DC=com',
+    'DC=child3,DC=contoso,DC=com',
+    'DC=child4,DC=contoso,DC=com',
+    'DC=child5,DC=contoso,DC=com',
+    'DC=child6,DC=contoso,DC=com'
+)
+$configNC = 'CN=Configuration,DC=contoso,DC=com'
+
+# SYSVOL write access: one DC per domain (preferably PDCe)
+$domainToDC = @{
+    'contoso.com'        = 'DC01.contoso.com'
+    'child1.contoso.com' = 'DC01.child1.contoso.com'
+    'child2.contoso.com' = 'DC01.child2.contoso.com'
+    'child3.contoso.com' = 'DC01.child3.contoso.com'
+    'child4.contoso.com' = 'DC03.child4.contoso.com'
+    'child5.contoso.com' = 'DC01.child5.contoso.com'
+    'child6.contoso.com' = 'DC01.child6.contoso.com'
+}
+
 # Read the local scripts into script blocks once
 $setWmiAcl = [scriptblock]::Create((Get-Content -Path '.\Set-WMINamespaceACL.ps1' -Raw))
 $setScmAcl = [scriptblock]::Create((Get-Content -Path '.\Set-SCM_ACL.ps1' -Raw))
@@ -72,6 +103,55 @@ function Write-Log ([string]$message, [string]$level = 'INFO') {
 }
 
 Write-Log "=== Starting Process-DCs | Operation: $operation | Account: $account | DCs: $($dcs.Count) ==="
+
+# ===========================
+# Phase 1: AD-level delegations (run once from admin workstation)
+# ===========================
+Write-Log "--- Phase 1: AD-level delegations ---"
+
+# 1a. Replicating Directory Changes on domain NCs
+Write-Log "  AD Convergence Rights (Replicating Directory Changes)..."
+try {
+    & (Join-Path $PSScriptRoot 'Set-ADConvergenceRights.ps1') `
+        -operation $operation -account $account `
+        -domainNCs $domainNCs -logPath $logPath
+    Write-Log "  AD Convergence Rights - completed" 'OK'
+}
+catch {
+    Write-Log "  AD Convergence Rights - FAILED: $($_.Exception.Message)" 'ERR'
+}
+
+# 1b. SYSVOL Write Access for convergence test
+Write-Log "  SYSVOL Write Access..."
+try {
+    & (Join-Path $PSScriptRoot 'Set-SYSVOLWriteAccess.ps1') `
+        -operation $operation -account $account `
+        -domainToDC $domainToDC -logPath $logPath
+    Write-Log "  SYSVOL Write Access - completed" 'OK'
+}
+catch {
+    Write-Log "  SYSVOL Write Access - FAILED: $($_.Exception.Message)" 'ERR'
+}
+
+# 1c. DFSR-GlobalSettings + NTDS Settings (Sites) Read delegation
+Write-Log "  DFSR/NTDS Settings AD Read delegation..."
+try {
+    & (Join-Path $PSScriptRoot 'Set-DfsrReadAccess.ps1') `
+        -operation $operation -account $account `
+        -domainNCs $domainNCs -configNC $configNC -logPath $logPath
+    Write-Log "  DFSR/NTDS Settings AD Read - completed" 'OK'
+}
+catch {
+    Write-Log "  DFSR/NTDS Settings AD Read - FAILED: $($_.Exception.Message)" 'ERR'
+}
+
+Write-Log "--- Phase 1 completed ---"
+Write-Host ''
+
+# ===========================
+# Phase 2: Per-DC settings (WMI ACLs, SCM DACL, Netlogon NTFS)
+# ===========================
+Write-Log "--- Phase 2: Per-DC settings ($($dcs.Count) DCs) ---"
 
 # --- The scriptblock that runs on each DC (or locally for loopback) ---
 $workerBlock = {

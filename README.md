@@ -17,7 +17,8 @@ These scripts are essential for **ODA Active Directory Assessment least-privileg
 | `Set-NetlogonPermissions.ps1` | Add or remove NTFS Read ACEs on `netlogon.dns` and `netlogon.log` | Per DC |
 | `Set-ADConvergenceRights.ps1` | Grant or revoke "Replicating Directory Changes" on domain naming contexts | Per domain |
 | `Set-SYSVOLWriteAccess.ps1` | Grant or revoke NTFS Modify on the SYSVOL domain root folder | Per domain |
-| `Process-DCs.ps1` | Orchestration script — loops through all DCs and applies WMI, SCM, and Netlogon permissions | All DCs |
+| `Set-DfsrReadAccess.ps1` | Grant or revoke Read on DFSR-GlobalSettings and NTDS Settings AD containers | Per domain |
+| `Process-DCs.ps1` | Orchestration script — runs AD-level delegations and per-DC permissions in two phases | All DCs |
 
 ## Why Multiple Scripts?
 
@@ -28,6 +29,7 @@ ODA AD Assessment collectors query multiple security layers on each domain contr
 3. **NTFS file ACLs** — Read access on `netlogon.dns` and `netlogon.log` (Backup Operators grants C$ share access, but standard .NET I/O does not activate `SeBackupPrivilege`)
 4. **AD extended rights** — "Replicating Directory Changes" on each domain NC for convergence testing
 5. **SYSVOL NTFS permissions** — Modify access on the SYSVOL domain root for DFS-R convergence measurement
+6. **DFSR / NTDS Settings AD objects** — Read on `CN=DFSR-GlobalSettings` (per domain) and `CN=Sites` in the Configuration partition for DFSR topology and NTDS Settings collectors
 
 Each script addresses one layer independently and is idempotent — running `add` when the ACE already exists will skip with a warning.
 
@@ -247,9 +249,51 @@ Grants or revokes NTFS **Modify** permission on the SYSVOL domain root folder. T
 .\Set-SYSVOLWriteAccess.ps1 -operation delete -account "CONTOSO\ODA-Assessment-Readers"
 ```
 
+## Set-DfsrReadAccess.ps1
+
+Grants or revokes **Generic Read** on AD containers required by the DFSR and NTDS Settings
+collectors. Uses `dsacls.exe` to delegate access on:
+
+1. `CN=DFSR-GlobalSettings,CN=System,<domainNC>` (subtree) — per domain
+2. `CN=Sites,CN=Configuration,<forestRoot>` (subtree) — covers all NTDS Settings objects
+3. `CN=DFSR-GlobalSettings,CN=System,CN=Configuration,<forestRoot>` (subtree, if present)
+
+This is required when hardened AD environments have tightened the default DACLs on these
+containers, causing empty results for Dfsr_Info, Volume_Config, and NTDS_Settings collectors.
+
+> **Scope:** This is a domain-level operation. Run once from an admin workstation, not per DC.
+
+### DFSR parameters
+
+| Parameter | Required | Default | Description |
+| --------- | -------- | ------- | ----------- |
+| `-operation` | Yes | — | `add` or `delete` |
+| `-account` | Yes | — | Account in `DOMAIN\Name` format |
+| `-domainNCs` | No | Placeholder list | Array of domain NC distinguished names |
+| `-configNC` | No | Placeholder DN | Configuration partition DN |
+| `-logPath` | No | `$null` | Path to a log file for timestamped change entries |
+
+### DFSR examples
+
+```powershell
+# Grant Read on DFSR containers and Sites for all domains
+.\Set-DfsrReadAccess.ps1 -operation add -account "CONTOSO\ODA-Assessment-Readers"
+
+# Revoke delegated rights
+.\Set-DfsrReadAccess.ps1 -operation delete -account "CONTOSO\ODA-Assessment-Readers"
+```
+
 ## Process-DCs.ps1
 
-Orchestration script that loops through a list of domain controllers and remotely applies **per-DC** permissions for a service account:
+Orchestration script that applies the **full ODA delegation** in two phases:
+
+### Phase 1 — AD-level delegations (run once)
+
+- `Set-ADConvergenceRights.ps1` — "Replicating Directory Changes" on domain NCs
+- `Set-SYSVOLWriteAccess.ps1` — NTFS Modify on SYSVOL domain folders
+- `Set-DfsrReadAccess.ps1` — Read on DFSR-GlobalSettings containers and CN=Sites (NTDS Settings)
+
+### Phase 2 — Per-DC settings (via WinRM)
 
 - **WMI namespace ACLs** on `Root\CIMV2`, `Root\default`, `Root\MicrosoftActiveDirectory`, `Root\directory`, `Root\MicrosoftDFS`, `Root\MicrosoftDNS`
 - **SCM DACL** for `Win32_Service` access (`SC_MANAGER_CONNECT` + `SC_MANAGER_ENUMERATE_SERVICE`)
@@ -257,9 +301,7 @@ Orchestration script that loops through a list of domain controllers and remotel
 
 When the target DC is the local machine, the script runs locally to avoid WinRM loopback failures.
 
-Edit the `$account` and `$dcs` variables at the top of the script to match your environment.
-
-> **Note:** `Set-ADConvergenceRights.ps1` and `Set-SYSVOLWriteAccess.ps1` are **not** included in `Process-DCs.ps1` — they are domain-level operations that only need to run once per domain, not per DC.
+Edit the `$account`, `$dcs`, `$domainNCs`, `$configNC`, and `$domainToDC` variables at the top of the script to match your environment.
 
 ### Logging
 
