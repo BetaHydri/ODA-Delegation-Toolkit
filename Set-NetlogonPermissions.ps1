@@ -88,7 +88,7 @@ process {
 
     foreach ($file in $files) {
         if (-not (Test-Path $file)) {
-            Write-Warning "File not found: $file — skipping."
+            Write-Warning "File not found: $file - skipping."
             Write-Log "SKIPPED: File not found: $file"
             continue
         }

@@ -110,7 +110,7 @@ process {
         try {
             switch ($operation) {
                 'add' {
-                    $output = & icacls.exe $sysvolPath /grant "${account}:(OI)(CI)M" /T 2>&1
+                    $output = & icacls.exe $sysvolPath /grant "${account}:(OI)(CI)M" 2>&1
                     if ($LASTEXITCODE -ne 0) {
                         throw "icacls failed (exit code $LASTEXITCODE): $($output -join ' ')"
                     }
@@ -118,7 +118,7 @@ process {
                 }
 
                 'delete' {
-                    $output = & icacls.exe $sysvolPath /remove $account /T 2>&1
+                    $output = & icacls.exe $sysvolPath /remove $account 2>&1
                     if ($LASTEXITCODE -ne 0) {
                         throw "icacls failed (exit code $LASTEXITCODE): $($output -join ' ')"
                     }
