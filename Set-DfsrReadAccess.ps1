@@ -123,6 +123,9 @@ process {
         }
     }
 
+    # Strip surrounding quotes the user may accidentally include at the prompt
+    $account = $account.Trim("'", '"', ' ')
+
     Write-Log "Operation='$operation' Account='$account' DomainNCs=$($domainNCs.Count)"
 
     # --- 1. DFSR-GlobalSettings container in each domain ---
@@ -164,14 +167,19 @@ process {
     # --- 3. DFSR-GlobalSettings in Configuration partition ---
     # Some DFSR topology objects live under the Configuration partition too
     $dfsrConfigDN = "CN=DFSR-GlobalSettings,CN=System,$configNC"
-    # Only process if the container exists (not all forests have this)
-    $testPath = "LDAP://$dfsrConfigDN"
+    # Only process if the container actually exists (not all forests have this)
     $dfsrConfigExists = $false
     try {
-        $null = [adsi]$testPath
-        $dfsrConfigExists = $true
+        $testEntry = [adsi]"LDAP://$dfsrConfigDN"
+        # [adsi] can bind without error even if the object is missing — verify the GUID
+        if ($testEntry.Guid) {
+            $dfsrConfigExists = $true
+        }
     }
     catch {
+        # Binding failed — object does not exist
+    }
+    if (-not $dfsrConfigExists) {
         Write-Log "DFSR-GlobalSettings not found in Configuration partition — skipping (normal)" 'WARN'
     }
 
