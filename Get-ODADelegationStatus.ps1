@@ -3,19 +3,30 @@
     Audits all ODA delegation group memberships and per-DC permissions across the forest.
 
 .DESCRIPTION
-    Run this on any DC in the forest with Domain Admin credentials.
+    Run this on any domain-joined machine with Domain Admin credentials for the target forest.
     It queries every domain for the expected built-in group memberships,
     checks SCM DACL, WMI namespace ACLs, and AD-level delegations.
     Outputs a structured report to console and optionally to a log file.
 
+    Use -ForestName when the operator's account belongs to a different forest than the
+    target environment (e.g. a consultant from fabrikam.com auditing contoso.com).
+
 .PARAMETER Account
     The ODA service account or group to check (e.g. 'CHILD1\ODA-Assessment-Readers').
+
+.PARAMETER ForestName
+    The DNS name of the target forest (e.g. 'contoso.com'). When omitted, the script uses
+    the forest of the machine it runs on (Get-ADDomain of the local computer account).
+    Use this when the operator's credentials are from a different forest.
 
 .PARAMETER LogPath
     Optional path for the output report file. Defaults to .\ODA-Delegation-Audit_<date>.log.
 
 .EXAMPLE
     .\Get-ODADelegationStatus.ps1 -Account 'CHILD1\ODA-Assessment-Readers'
+
+.EXAMPLE
+    .\Get-ODADelegationStatus.ps1 -Account 'CHILD1\ODA-Assessment-Readers' -ForestName 'contoso.com'
 
 .AUTHOR
     Jan Tiedemann
@@ -28,6 +39,8 @@
 param (
     [Parameter(Mandatory)]
     [string]$Account,
+
+    [string]$ForestName,
 
     [string]$LogPath = (Join-Path $PSScriptRoot ('ODA-Delegation-Audit_{0:yyyyMMdd_HHmmss}.log' -f (Get-Date)))
 )
@@ -143,7 +156,33 @@ Write-Report ''
 #endregion
 
 #region Discover forest and domains
-$forest = [System.DirectoryServices.ActiveDirectory.Forest]::GetCurrentForest()
+if ($ForestName) {
+    # Explicit forest — use DirectoryContext (operator may be from a different forest)
+    Write-Report "Connecting to specified forest: $ForestName" 'INFO'
+    try {
+        $ctx = New-Object System.DirectoryServices.ActiveDirectory.DirectoryContext(
+            [System.DirectoryServices.ActiveDirectory.DirectoryContextType]::Forest, $ForestName)
+        $forest = [System.DirectoryServices.ActiveDirectory.Forest]::GetForest($ctx)
+    }
+    catch {
+        Write-Report "FATAL: Cannot connect to forest '$ForestName': $_" 'ERR'
+        return
+    }
+}
+else {
+    # No forest specified — use the machine's domain to find the forest
+    # (not GetCurrentForest which uses the logged-in user's forest)
+    try {
+        $machineDomain = [System.DirectoryServices.ActiveDirectory.Domain]::GetComputerDomain()
+        $forest = $machineDomain.Forest
+        Write-Report "Auto-detected forest from machine domain: $($machineDomain.Name)" 'INFO'
+    }
+    catch {
+        # Fallback: try GetCurrentForest (works when operator IS in the target forest)
+        Write-Report 'Machine domain detection failed, falling back to current user forest' 'WARN'
+        $forest = [System.DirectoryServices.ActiveDirectory.Forest]::GetCurrentForest()
+    }
+}
 $domains = $forest.Domains
 
 Write-Report "Forest: $($forest.Name)" 'HEADER'
