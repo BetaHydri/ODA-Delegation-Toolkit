@@ -258,13 +258,12 @@ foreach ($domain in $domains) {
             continue
         }
 
-        # --- SCM DACL check ---
+        # --- SCM DACL check (direct RPC — no WinRM needed) ---
         try {
-            $scOutput = Invoke-Command -ComputerName $dcFqdn -ScriptBlock {
-                (& sc.exe sdshow scmanager 2>&1) | Where-Object { $_ -match '^[DOS]:' }
-            } -ErrorAction Stop
+            $scOutput = & sc.exe "\\$dcFqdn" sdshow scmanager 2>&1
+            $sddl = ($scOutput | Where-Object { $_ -match '^[DOS]:' }) -join ''
+            $sddl = $sddl.Trim()
 
-            $sddl = ($scOutput -join '').Trim()
             if ($sddl -match [regex]::Escape($accountSID)) {
                 Write-Report "  SCM DACL: SID $accountSID FOUND in SDDL" 'OK'
             }
@@ -274,62 +273,38 @@ foreach ($domain in $domains) {
             Write-Report "  SCM SDDL: $sddl" 'INFO'
         }
         catch {
-            Write-Report "  SCM DACL: CHECK FAILED (WinRM?) — $($_.Exception.Message)" 'ERR'
+            Write-Report "  SCM DACL: CHECK FAILED (RPC) — $($_.Exception.Message)" 'ERR'
         }
 
-        # --- WMI namespace ACL check (Root\CIMV2 only — representative) ---
+        # --- WMI namespace ACL check (direct DCOM — same path as Sirona) ---
         try {
-            $wmiResult = Invoke-Command -ComputerName $dcFqdn -ScriptBlock {
-                param ($sid)
-                try {
-                    $wmiSec = Get-WmiObject -Namespace 'Root' -Class '__SystemSecurity' -ErrorAction Stop
-                    $sd = @($null)
-                    $wmiSec.GetSecurityDescriptor() | Out-Null
-                    $sdMethod = $wmiSec.PSBase.InvokeMethod('GetSD', $sd)
-
-                    # Alternative: try a simple WMI query as the test
-                    $bios = Get-WmiObject -Namespace 'Root\CIMV2' -Class Win32_BIOS -ErrorAction Stop
-                    if ($bios) { return 'WMI_CIMV2_OK' }
-                    else { return 'WMI_CIMV2_EMPTY' }
-                }
-                catch {
-                    return "WMI_CIMV2_FAIL: $($_.Exception.Message)"
-                }
-            } -ErrorAction Stop
-
-            if ($wmiResult -eq 'WMI_CIMV2_OK') {
+            $bios = Get-WmiObject -Namespace 'Root\CIMV2' -Class Win32_BIOS `
+                -ComputerName $dcFqdn -ErrorAction Stop
+            if ($bios) {
                 Write-Report "  WMI Root\CIMV2: Accessible (Win32_BIOS query OK)" 'OK'
             }
             else {
-                Write-Report "  WMI Root\CIMV2: $wmiResult" 'ERR'
+                Write-Report "  WMI Root\CIMV2: Query returned empty" 'WARN'
             }
         }
         catch {
-            Write-Report "  WMI Root\CIMV2: CHECK FAILED (WinRM?) — $($_.Exception.Message)" 'ERR'
+            Write-Report "  WMI Root\CIMV2: DCOM FAIL — $($_.Exception.Message)" 'ERR'
         }
 
-        # --- Win32_Service test (SCM provider-level check) ---
+        # --- Win32_Service test (direct DCOM — SCM provider-level check) ---
         try {
-            $svcResult = Invoke-Command -ComputerName $dcFqdn -ScriptBlock {
-                try {
-                    $svc = Get-WmiObject -Namespace 'Root\CIMV2' -Query "SELECT State FROM Win32_Service WHERE Name='DNS'" -ErrorAction Stop
-                    if ($svc) { return "Win32_Service_OK: DNS=$($svc.State)" }
-                    else { return 'Win32_Service_EMPTY' }
-                }
-                catch {
-                    return "Win32_Service_FAIL: $($_.Exception.Message)"
-                }
-            } -ErrorAction Stop
-
-            if ($svcResult -match '^Win32_Service_OK') {
-                Write-Report "  Win32_Service (DNS): $svcResult" 'OK'
+            $svc = Get-WmiObject -Namespace 'Root\CIMV2' `
+                -Query "SELECT State FROM Win32_Service WHERE Name='DNS'" `
+                -ComputerName $dcFqdn -ErrorAction Stop
+            if ($svc) {
+                Write-Report "  Win32_Service (DNS): OK — DNS=$($svc.State)" 'OK'
             }
             else {
-                Write-Report "  Win32_Service (DNS): $svcResult" 'ERR'
+                Write-Report "  Win32_Service (DNS): Query returned empty" 'WARN'
             }
         }
         catch {
-            Write-Report "  Win32_Service (DNS): CHECK FAILED (WinRM?) — $($_.Exception.Message)" 'ERR'
+            Write-Report "  Win32_Service (DNS): FAIL — $($_.Exception.Message)" 'ERR'
         }
 
         Write-Report ''
