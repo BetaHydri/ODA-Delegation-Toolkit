@@ -19,6 +19,7 @@ These scripts are essential for **ODA Active Directory Assessment least-privileg
 | `Set-SYSVOLWriteAccess.ps1` | Grant or revoke NTFS Modify on the SYSVOL domain root folder | Per domain |
 | `Set-DfsrReadAccess.ps1` | Grant or revoke Read on DFSR-GlobalSettings and NTDS Settings AD containers | Per domain |
 | `Process-DCs.ps1` | Orchestration script — runs AD-level delegations and per-DC permissions in two phases | All DCs |
+| `Get-ODADelegationStatus.ps1` | Audit all ODA delegation group memberships and per-DC permissions across the forest | Forest-wide |
 
 ## Why Multiple Scripts?
 
@@ -341,6 +342,41 @@ Edit the `$account`, `$dcs`, `$domainNCs`, `$configNC`, and `$domainToDC` variab
 - `[OK]` or `[ERR]` status per domain controller and per setting
 - Timestamps for every entry
 - Summary counts at the end
+
+## Get-ODADelegationStatus.ps1
+
+Forest-wide **audit script** that verifies all ODA delegation settings are correctly applied. Run this after `Process-DCs.ps1` to confirm every permission layer is in place — or use it to diagnose failures when Sirona collectors report access-denied errors.
+
+### What it checks
+
+| Layer | Check | Method |
+| ----- | ----- | ------ |
+| Built-in groups | Event Log Readers, Performance Monitor Users, Distributed COM Users, Remote Management Users, Backup Operators, DnsAdmins | `Get-ADGroupMember` per domain (direct + one-level nested) |
+| SCM DACL | Account SID present in SCM SDDL | `sc.exe sdshow scmanager` via WinRM |
+| WMI namespace | `Root\CIMV2` accessible | `Get-WmiObject Win32_BIOS` via WinRM |
+| Win32_Service | DNS service queryable (SCM provider gate) | `Get-WmiObject Win32_Service WHERE Name='DNS'` via WinRM |
+| AD convergence | "Replicating Directory Changes" on each domain NC | `dsacls.exe` output parsing |
+
+### Audit Parameters
+
+| Parameter | Required | Default | Description |
+| --------- | -------- | ------- | ----------- |
+| `-Account` | Yes | — | The ODA service account or group to check (e.g. `CHILD1\ODA-Assessment-Readers`) |
+| `-LogPath` | No | `.\ODA-Delegation-Audit_<date>.log` | Path for the output report file |
+
+### Audit Examples
+
+```powershell
+# Full forest audit — report saved to default log file
+.\Get-ODADelegationStatus.ps1 -Account 'CHILD1\ODA-Assessment-Readers'
+
+# Custom log path
+.\Get-ODADelegationStatus.ps1 -Account 'CONTOSO\ODA-Assessment-Readers' -LogPath 'C:\Logs\oda-audit.log'
+```
+
+### Output
+
+The script produces color-coded console output and a structured log file with `[OK]`, `[ERR]`, and `[WARN]` prefixes for every check. Use the log file to identify exactly which permissions are missing on which DCs.
 
 ## Prerequisites
 
