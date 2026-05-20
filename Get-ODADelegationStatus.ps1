@@ -52,6 +52,7 @@ function Write-Report {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory)]
+        [AllowEmptyString()]
         [string]$Message,
 
         [ValidateSet('INFO', 'OK', 'WARN', 'ERR', 'HEADER')]
@@ -62,11 +63,11 @@ function Write-Report {
     $entry | Out-File -FilePath $LogPath -Append -Encoding utf8
 
     switch ($Level) {
-        'OK'     { Write-Host $entry -ForegroundColor Green }
-        'WARN'   { Write-Host $entry -ForegroundColor Yellow }
-        'ERR'    { Write-Host $entry -ForegroundColor Red }
+        'OK' { Write-Host $entry -ForegroundColor Green }
+        'WARN' { Write-Host $entry -ForegroundColor Yellow }
+        'ERR' { Write-Host $entry -ForegroundColor Red }
         'HEADER' { Write-Host $entry -ForegroundColor Cyan }
-        default  { Write-Host $entry }
+        default { Write-Host $entry }
     }
 }
 
