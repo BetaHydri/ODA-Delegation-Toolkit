@@ -361,7 +361,7 @@ Forest-wide **audit script** that verifies all ODA delegation settings are corre
 
 | Parameter | Required | Default | Description |
 | --------- | -------- | ------- | ----------- |
-| `-Account` | Yes | — | The ODA service account or group to check (e.g. `CHILD1\ODA-Assessment-Readers`) |
+| `-Account` | Yes | — | The ODA service account or group to check (e.g. `DOM-TEST\ODA-Assessment-Readers`) |
 | `-LogPath` | No | `.\ODA-Delegation-Audit_<date>.log` | Path for the output report file |
 
 ### Audit Examples
