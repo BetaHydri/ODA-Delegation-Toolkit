@@ -91,8 +91,6 @@ function Test-GroupMembership {
         [string]$AccountSID
     )
 
-    # Use SID for lookup if provided (locale-independent), fall back to name
-    $identity = if ($GroupSID) { $GroupSID } else { $GroupName }
     # Resolve display name for reporting
     if ($GroupSID -and -not $GroupName) {
         try {
@@ -107,8 +105,7 @@ function Test-GroupMembership {
     if ($script:Credential) { $commonParams['Credential'] = $script:Credential }
 
     try {
-        # Get group and its member attribute (more reliable than Get-ADGroupMember cross-domain)
-        # Use LDAPFilter for SID lookup since Get-ADObject -Identity doesn't accept SIDs
+        # Find the built-in group by SID, or domain group by name
         if ($GroupSID) {
             $group = Get-ADObject -LDAPFilter "(objectSid=$GroupSID)" `
                 -SearchBase "CN=Builtin,$DomainDN" -SearchScope Subtree `
@@ -125,43 +122,33 @@ function Test-GroupMembership {
         }
 
         $memberDNs = @($group.member)
-
         if ($memberDNs.Count -eq 0) {
             Write-Report "  $GroupName : Group has no members" 'ERR'
             return $false
         }
 
-        # Check each member for SID match (direct or one-level nested)
+        # Check each direct member
         foreach ($dn in $memberDNs) {
-            try {
-                $obj = Get-ADObject -Identity $dn -Properties objectSid, objectClass, Name @commonParams
-            }
-            catch {
-                # Member from different domain (FSP) — resolve locally by DN
-                continue
-            }
+            $obj = Get-ADObject -Identity $dn -Properties objectSid, objectClass, Name @commonParams
 
+            # Direct SID match
             if ($obj.objectSid.Value -eq $AccountSID) {
                 Write-Report "  $GroupName : $($obj.Name) (SID match)" 'OK'
                 return $true
             }
 
-            # One-level nested: if member is a group, check its members
+            # Member is a group (e.g. ODA-DC-Readers) — check its members (one level)
             if ($obj.objectClass -eq 'group') {
-                try {
-                    $nestedGroup = Get-ADObject -Identity $dn -Properties member @commonParams
-                    foreach ($nestedDN in @($nestedGroup.member)) {
-                        try {
-                            $nestedObj = Get-ADObject -Identity $nestedDN -Properties objectSid, Name @commonParams
-                            if ($nestedObj.objectSid.Value -eq $AccountSID) {
-                                Write-Report "  $GroupName : $($nestedObj.Name) (nested via $($obj.Name))" 'OK'
-                                return $true
-                            }
-                        }
-                        catch { }
+                $nested = Get-ADObject -Identity $dn -Properties member @commonParams
+                foreach ($nestedDN in @($nested.member)) {
+                    # Nested member may be local or a Foreign Security Principal
+                    $nestedObj = Get-ADObject -Identity $nestedDN `
+                        -Properties objectSid, Name @commonParams
+                    if ($nestedObj.objectSid.Value -eq $AccountSID) {
+                        Write-Report "  $GroupName : $($nestedObj.Name) (nested via $($obj.Name))" 'OK'
+                        return $true
                     }
                 }
-                catch { }
             }
         }
 
