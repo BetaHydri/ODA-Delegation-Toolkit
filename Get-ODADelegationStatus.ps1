@@ -102,44 +102,56 @@ function Test-GroupMembership {
         catch { $GroupName = $GroupSID }
     }
 
-    # Build common parameters for Get-ADGroupMember
-    $adParams = @{ Identity = $identity; Server = $Server; ErrorAction = 'Stop' }
-    if ($script:Credential) { $adParams['Credential'] = $script:Credential }
+    # Build common parameters
+    $commonParams = @{ Server = $Server; ErrorAction = 'Stop' }
+    if ($script:Credential) { $commonParams['Credential'] = $script:Credential }
 
     try {
-        $members = Get-ADGroupMember @adParams
-        $found = $members | Where-Object { $_.SID.Value -eq $AccountSID }
-        if ($found) {
-            Write-Report "  $GroupName : $($found.Name) (SID match)" 'OK'
-            return $true
+        # Get group and its member attribute (more reliable than Get-ADGroupMember cross-domain)
+        $group = Get-ADObject -Identity $identity -Properties member @commonParams
+        $memberDNs = @($group.member)
+
+        if ($memberDNs.Count -eq 0) {
+            Write-Report "  $GroupName : Group has no members" 'ERR'
+            return $false
         }
-        else {
-            # Check nested — maybe the group is a member via nesting
-            $nestedFound = $false
-            foreach ($m in $members) {
-                if ($m.objectClass -eq 'group') {
-                    try {
-                        $nestedParams = @{ Identity = $m.SID; Server = $Server; ErrorAction = 'Stop' }
-                        if ($script:Credential) { $nestedParams['Credential'] = $script:Credential }
-                        $nestedMembers = Get-ADGroupMember @nestedParams
-                        $nested = $nestedMembers | Where-Object { $_.SID.Value -eq $AccountSID }
-                        if ($nested) {
-                            Write-Report "  $GroupName : $($nested.Name) (nested via $($m.Name))" 'OK'
-                            $nestedFound = $true
-                            break
+
+        # Check each member for SID match (direct or one-level nested)
+        foreach ($dn in $memberDNs) {
+            try {
+                $obj = Get-ADObject -Identity $dn -Properties objectSid, objectClass, Name @commonParams
+            }
+            catch {
+                # Member from different domain (FSP) — resolve locally by DN
+                continue
+            }
+
+            if ($obj.objectSid.Value -eq $AccountSID) {
+                Write-Report "  $GroupName : $($obj.Name) (SID match)" 'OK'
+                return $true
+            }
+
+            # One-level nested: if member is a group, check its members
+            if ($obj.objectClass -eq 'group') {
+                try {
+                    $nestedGroup = Get-ADObject -Identity $dn -Properties member @commonParams
+                    foreach ($nestedDN in @($nestedGroup.member)) {
+                        try {
+                            $nestedObj = Get-ADObject -Identity $nestedDN -Properties objectSid, Name @commonParams
+                            if ($nestedObj.objectSid.Value -eq $AccountSID) {
+                                Write-Report "  $GroupName : $($nestedObj.Name) (nested via $($obj.Name))" 'OK'
+                                return $true
+                            }
                         }
-                    }
-                    catch {
-                        # Nested group from different domain — try GC
+                        catch { }
                     }
                 }
+                catch { }
             }
-            if (-not $nestedFound) {
-                Write-Report "  $GroupName : NOT FOUND — account not a member" 'ERR'
-                return $false
-            }
-            return $true
         }
+
+        Write-Report "  $GroupName : NOT FOUND — account not a member" 'ERR'
+        return $false
     }
     catch {
         Write-Report "  $GroupName : QUERY FAILED — $($_.Exception.Message)" 'ERR'
