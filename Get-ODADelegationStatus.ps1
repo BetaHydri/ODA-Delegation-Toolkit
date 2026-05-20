@@ -127,6 +127,11 @@ function Test-GroupMembership {
             return $false
         }
 
+        # Extract account short name for cross-domain DN matching
+        $accountShort = if ($script:Account.Contains('\')) {
+            $script:Account.Split('\')[-1]
+        } else { $script:Account }
+
         # Check each direct member
         foreach ($dn in $memberDNs) {
             try {
@@ -134,7 +139,11 @@ function Test-GroupMembership {
                 Write-Report "    [member] $dn → $($obj.Name) ($($obj.objectClass), SID=$($obj.objectSid.Value))" 'INFO'
             }
             catch {
-                # Cross-domain member DN — cannot resolve on this DC, skip
+                # Cross-domain member DN — check if it matches the account by CN
+                if ($dn -match "^CN=$([regex]::Escape($accountShort)),") {
+                    Write-Report "  $GroupName : $accountShort (cross-domain member, DN match)" 'OK'
+                    return $true
+                }
                 Write-Report "    [skip] $dn (cross-domain, unresolvable on $Server)" 'WARN'
                 continue
             }
