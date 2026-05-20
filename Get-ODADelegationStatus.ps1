@@ -368,11 +368,30 @@ foreach ($domain in $domains) {
             $sddl = ($scOutput | Where-Object { $_ -match '^[DOS]:' }) -join ''
             $sddl = $sddl.Trim()
 
+            $scmFound = $false
             if ($sddl -match [regex]::Escape($accountSID)) {
                 Write-Report "  SCM DACL: SID $accountSID FOUND in SDDL" 'OK'
+                $scmFound = $true
             }
             else {
-                Write-Report "  SCM DACL: SID $accountSID NOT found in SDDL" 'ERR'
+                # SID not found directly — resolve all SIDs in SDDL via NTAccount
+                $sddlSids = [regex]::Matches($sddl, 'S-1-5-21-[\d-]+') |
+                    ForEach-Object { $_.Value } | Select-Object -Unique
+                foreach ($sid in $sddlSids) {
+                    try {
+                        $sidObj = New-Object System.Security.Principal.SecurityIdentifier($sid)
+                        $resolved = $sidObj.Translate([System.Security.Principal.NTAccount]).Value
+                        if ($resolved -eq $Account) {
+                            Write-Report "  SCM DACL: $Account FOUND via NTAccount (SID=$sid)" 'OK'
+                            $scmFound = $true
+                            break
+                        }
+                    }
+                    catch { }
+                }
+                if (-not $scmFound) {
+                    Write-Report "  SCM DACL: $Account NOT found in SDDL" 'ERR'
+                }
             }
             Write-Report "  SCM SDDL: $sddl" 'INFO'
         }
