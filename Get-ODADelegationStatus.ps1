@@ -108,7 +108,22 @@ function Test-GroupMembership {
 
     try {
         # Get group and its member attribute (more reliable than Get-ADGroupMember cross-domain)
-        $group = Get-ADObject -Identity $identity -Properties member @commonParams
+        # Use LDAPFilter for SID lookup since Get-ADObject -Identity doesn't accept SIDs
+        if ($GroupSID) {
+            $group = Get-ADObject -LDAPFilter "(objectSid=$GroupSID)" `
+                -SearchBase "CN=Builtin,$DomainDN" -SearchScope Subtree `
+                -Properties member @commonParams
+        }
+        else {
+            $group = Get-ADObject -LDAPFilter "(sAMAccountName=$GroupName)" `
+                -Properties member @commonParams
+        }
+
+        if (-not $group) {
+            Write-Report "  $GroupName : GROUP NOT FOUND" 'ERR'
+            return $false
+        }
+
         $memberDNs = @($group.member)
 
         if ($memberDNs.Count -eq 0) {
