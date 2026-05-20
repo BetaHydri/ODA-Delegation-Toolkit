@@ -131,9 +131,11 @@ function Test-GroupMembership {
         foreach ($dn in $memberDNs) {
             try {
                 $obj = Get-ADObject -Identity $dn -Properties objectSid, objectClass, Name @commonParams
+                Write-Report "    [member] $dn → $($obj.Name) ($($obj.objectClass), SID=$($obj.objectSid.Value))" 'INFO'
             }
             catch {
                 # Cross-domain member DN — cannot resolve on this DC, skip
+                Write-Report "    [skip] $dn (cross-domain, unresolvable on $Server)" 'WARN'
                 continue
             }
 
@@ -154,8 +156,12 @@ function Test-GroupMembership {
                     try {
                         $nestedObj = Get-ADObject -Identity $nestedDN `
                             -Properties objectSid, Name @commonParams
+                        Write-Report "      [nested] $nestedDN → $($nestedObj.Name) (SID=$($nestedObj.objectSid.Value))" 'INFO'
                     }
-                    catch { continue }
+                    catch {
+                        Write-Report "      [skip] $nestedDN (cross-domain, unresolvable on $Server)" 'WARN'
+                        continue
+                    }
 
                     if ($nestedObj.objectSid.Value -eq $AccountSID) {
                         Write-Report "  $GroupName : $($nestedObj.Name) (nested via $($obj.Name))" 'OK'
@@ -165,7 +171,7 @@ function Test-GroupMembership {
             }
         }
 
-        Write-Report "  $GroupName : NOT FOUND — account not a member" 'ERR'
+        Write-Report "  $GroupName : NOT FOUND — account not a member (checked $($memberDNs.Count) members on $Server)" 'ERR'
         return $false
     }
     catch {
