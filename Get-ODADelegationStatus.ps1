@@ -130,7 +130,8 @@ function Test-GroupMembership {
         # Extract account short name for cross-domain DN matching
         $accountShort = if ($script:Account.Contains('\')) {
             $script:Account.Split('\')[-1]
-        } else { $script:Account }
+        }
+        else { $script:Account }
 
         # Check each direct member
         foreach ($dn in $memberDNs) {
@@ -154,7 +155,23 @@ function Test-GroupMembership {
                 return $true
             }
 
-            # Member is a group (e.g. ODA-DC-Readers) — check its members (one level)
+            # FSP — resolve SID to NTAccount via trust path and compare
+            if ($obj.objectClass -eq 'foreignSecurityPrincipal') {
+                try {
+                    $fspSidObj = New-Object System.Security.Principal.SecurityIdentifier($obj.objectSid.Value)
+                    $fspAccount = $fspSidObj.Translate([System.Security.Principal.NTAccount]).Value
+                    Write-Report "    [FSP resolved] SID $($obj.objectSid.Value) → $fspAccount" 'INFO'
+                    if ($fspAccount -eq $script:Account) {
+                        Write-Report "  $GroupName : $fspAccount (FSP NTAccount match)" 'OK'
+                        return $true
+                    }
+                }
+                catch {
+                    Write-Report "    [FSP] SID $($obj.objectSid.Value) could not be translated to NTAccount" 'WARN'
+                }
+            }
+
+            # Member is a group — check its members (one level)
             if ($obj.objectClass -eq 'group') {
                 try {
                     $nested = Get-ADObject -Identity $dn -Properties member @commonParams
@@ -164,10 +181,15 @@ function Test-GroupMembership {
                 foreach ($nestedDN in @($nested.member)) {
                     try {
                         $nestedObj = Get-ADObject -Identity $nestedDN `
-                            -Properties objectSid, Name @commonParams
+                            -Properties objectSid, objectClass, Name @commonParams
                         Write-Report "      [nested] $nestedDN → $($nestedObj.Name) (SID=$($nestedObj.objectSid.Value))" 'INFO'
                     }
                     catch {
+                        # Cross-domain nested member — check CN match
+                        if ($nestedDN -match "^CN=$([regex]::Escape($accountShort)),") {
+                            Write-Report "  $GroupName : $accountShort (nested cross-domain DN match via $($obj.Name))" 'OK'
+                            return $true
+                        }
                         Write-Report "      [skip] $nestedDN (cross-domain, unresolvable on $Server)" 'WARN'
                         continue
                     }
@@ -175,6 +197,22 @@ function Test-GroupMembership {
                     if ($nestedObj.objectSid.Value -eq $AccountSID) {
                         Write-Report "  $GroupName : $($nestedObj.Name) (nested via $($obj.Name))" 'OK'
                         return $true
+                    }
+
+                    # Nested FSP — resolve via NTAccount
+                    if ($nestedObj.objectClass -eq 'foreignSecurityPrincipal') {
+                        try {
+                            $nfspSid = New-Object System.Security.Principal.SecurityIdentifier($nestedObj.objectSid.Value)
+                            $nfspAccount = $nfspSid.Translate([System.Security.Principal.NTAccount]).Value
+                            Write-Report "      [FSP resolved] SID $($nestedObj.objectSid.Value) → $nfspAccount" 'INFO'
+                            if ($nfspAccount -eq $script:Account) {
+                                Write-Report "  $GroupName : $nfspAccount (nested FSP NTAccount match via $($obj.Name))" 'OK'
+                                return $true
+                            }
+                        }
+                        catch {
+                            Write-Report "      [FSP] SID $($nestedObj.objectSid.Value) could not be translated" 'WARN'
+                        }
                     }
                 }
             }
