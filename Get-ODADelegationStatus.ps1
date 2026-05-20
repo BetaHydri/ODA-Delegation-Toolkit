@@ -19,6 +19,11 @@
     the forest of the machine it runs on (Get-ADDomain of the local computer account).
     Use this when the operator's credentials are from a different forest.
 
+.PARAMETER Credential
+    PSCredential for authenticating to the target forest. Use when the operator's logged-in
+    account cannot authenticate to child domain DCs (e.g. fabrikam.com user with DA in contoso.com).
+    Pass credentials from the target forest: Get-Credential 'CONTOSO\admin'
+
 .PARAMETER LogPath
     Optional path for the output report file. Defaults to .\ODA-Delegation-Audit_<date>.log.
 
@@ -27,6 +32,9 @@
 
 .EXAMPLE
     .\Get-ODADelegationStatus.ps1 -Account 'CHILD1\ODA-Assessment-Readers' -ForestName 'contoso.com'
+
+.EXAMPLE
+    .\Get-ODADelegationStatus.ps1 -Account 'CHILD1\ODA-Assessment-Readers' -ForestName 'contoso.com' -Credential (Get-Credential 'CONTOSO\admin')
 
 .AUTHOR
     Jan Tiedemann
@@ -41,6 +49,8 @@ param (
     [string]$Account,
 
     [string]$ForestName,
+
+    [System.Management.Automation.PSCredential]$Credential,
 
     [string]$LogPath = (Join-Path $PSScriptRoot ('ODA-Delegation-Audit_{0:yyyyMMdd_HHmmss}.log' -f (Get-Date)))
 )
@@ -92,8 +102,12 @@ function Test-GroupMembership {
         catch { $GroupName = $GroupSID }
     }
 
+    # Build common parameters for Get-ADGroupMember
+    $adParams = @{ Identity = $identity; Server = $Server; ErrorAction = 'Stop' }
+    if ($script:Credential) { $adParams['Credential'] = $script:Credential }
+
     try {
-        $members = Get-ADGroupMember -Identity $identity -Server $Server -ErrorAction Stop
+        $members = Get-ADGroupMember @adParams
         $found = $members | Where-Object { $_.SID.Value -eq $AccountSID }
         if ($found) {
             Write-Report "  $GroupName : $($found.Name) (SID match)" 'OK'
@@ -105,7 +119,9 @@ function Test-GroupMembership {
             foreach ($m in $members) {
                 if ($m.objectClass -eq 'group') {
                     try {
-                        $nestedMembers = Get-ADGroupMember -Identity $m.SID -Server $Server -ErrorAction Stop
+                        $nestedParams = @{ Identity = $m.SID; Server = $Server; ErrorAction = 'Stop' }
+                        if ($script:Credential) { $nestedParams['Credential'] = $script:Credential }
+                        $nestedMembers = Get-ADGroupMember @nestedParams
                         $nested = $nestedMembers | Where-Object { $_.SID.Value -eq $AccountSID }
                         if ($nested) {
                             Write-Report "  $GroupName : $($nested.Name) (nested via $($m.Name))" 'OK'
@@ -135,6 +151,7 @@ function Test-GroupMembership {
 #region Resolve account SID
 Write-Report '=== ODA Delegation Audit ===' 'HEADER'
 Write-Report "Account: $Account"
+if ($Credential) { Write-Report "Credential: $($Credential.UserName)" 'INFO' }
 Write-Report "Log:     $LogPath"
 Write-Report ''
 
@@ -161,8 +178,15 @@ if ($ForestName) {
     # Explicit forest — use DirectoryContext (operator may be from a different forest)
     Write-Report "Connecting to specified forest: $ForestName" 'INFO'
     try {
-        $ctx = New-Object System.DirectoryServices.ActiveDirectory.DirectoryContext(
-            [System.DirectoryServices.ActiveDirectory.DirectoryContextType]::Forest, $ForestName)
+        if ($Credential) {
+            $ctx = New-Object System.DirectoryServices.ActiveDirectory.DirectoryContext(
+                [System.DirectoryServices.ActiveDirectory.DirectoryContextType]::Forest,
+                $ForestName, $Credential.UserName, $Credential.GetNetworkCredential().Password)
+        }
+        else {
+            $ctx = New-Object System.DirectoryServices.ActiveDirectory.DirectoryContext(
+                [System.DirectoryServices.ActiveDirectory.DirectoryContextType]::Forest, $ForestName)
+        }
         $forest = [System.DirectoryServices.ActiveDirectory.Forest]::GetForest($ctx)
     }
     catch {
