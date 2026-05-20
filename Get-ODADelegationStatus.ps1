@@ -129,7 +129,13 @@ function Test-GroupMembership {
 
         # Check each direct member
         foreach ($dn in $memberDNs) {
-            $obj = Get-ADObject -Identity $dn -Properties objectSid, objectClass, Name @commonParams
+            try {
+                $obj = Get-ADObject -Identity $dn -Properties objectSid, objectClass, Name @commonParams
+            }
+            catch {
+                # Cross-domain member DN — cannot resolve on this DC, skip
+                continue
+            }
 
             # Direct SID match
             if ($obj.objectSid.Value -eq $AccountSID) {
@@ -139,11 +145,18 @@ function Test-GroupMembership {
 
             # Member is a group (e.g. ODA-DC-Readers) — check its members (one level)
             if ($obj.objectClass -eq 'group') {
-                $nested = Get-ADObject -Identity $dn -Properties member @commonParams
+                try {
+                    $nested = Get-ADObject -Identity $dn -Properties member @commonParams
+                }
+                catch { continue }
+
                 foreach ($nestedDN in @($nested.member)) {
-                    # Nested member may be local or a Foreign Security Principal
-                    $nestedObj = Get-ADObject -Identity $nestedDN `
-                        -Properties objectSid, Name @commonParams
+                    try {
+                        $nestedObj = Get-ADObject -Identity $nestedDN `
+                            -Properties objectSid, Name @commonParams
+                    }
+                    catch { continue }
+
                     if ($nestedObj.objectSid.Value -eq $AccountSID) {
                         Write-Report "  $GroupName : $($nestedObj.Name) (nested via $($obj.Name))" 'OK'
                         return $true
