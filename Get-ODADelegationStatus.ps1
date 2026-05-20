@@ -61,13 +61,25 @@ function Test-GroupMembership {
     [CmdletBinding()]
     param (
         [string]$GroupName,
+        [string]$GroupSID,
         [string]$DomainDN,
         [string]$Server,
         [string]$AccountSID
     )
 
+    # Use SID for lookup if provided (locale-independent), fall back to name
+    $identity = if ($GroupSID) { $GroupSID } else { $GroupName }
+    # Resolve display name for reporting
+    if ($GroupSID -and -not $GroupName) {
+        try {
+            $sidObj = New-Object System.Security.Principal.SecurityIdentifier($GroupSID)
+            $GroupName = $sidObj.Translate([System.Security.Principal.NTAccount]).Value.Split('\')[-1]
+        }
+        catch { $GroupName = $GroupSID }
+    }
+
     try {
-        $members = Get-ADGroupMember -Identity $GroupName -Server $Server -ErrorAction Stop
+        $members = Get-ADGroupMember -Identity $identity -Server $Server -ErrorAction Stop
         $found = $members | Where-Object { $_.SID.Value -eq $AccountSID }
         if ($found) {
             Write-Report "  $GroupName : $($found.Name) (SID match)" 'OK'
@@ -140,12 +152,13 @@ Write-Report ''
 #endregion
 
 #region Per-domain: check built-in group memberships
+# Use well-known SIDs for locale-independent lookups (works on German, English, etc.)
 $builtinGroups = @(
-    'Event Log Readers'
-    'Performance Monitor Users'
-    'Distributed COM Users'
-    'Remote Management Users'
-    'Backup Operators'
+    @{ SID = 'S-1-5-32-573'; Name = 'Event Log Readers' }
+    @{ SID = 'S-1-5-32-558'; Name = 'Performance Monitor Users' }
+    @{ SID = 'S-1-5-32-562'; Name = 'Distributed COM Users' }
+    @{ SID = 'S-1-5-32-580'; Name = 'Remote Management Users' }
+    @{ SID = 'S-1-5-32-551'; Name = 'Backup Operators' }
 )
 
 foreach ($domain in $domains) {
@@ -164,13 +177,13 @@ foreach ($domain in $domains) {
 
     Write-Report "--- $domainName (DC: $dcName) ---" 'HEADER'
 
-    # Check built-in groups
-    foreach ($groupName in $builtinGroups) {
-        Test-GroupMembership -GroupName $groupName -DomainDN $domainDN `
-            -Server $dcName -AccountSID $accountSID | Out-Null
+    # Check built-in groups by SID (locale-independent)
+    foreach ($grp in $builtinGroups) {
+        Test-GroupMembership -GroupSID $grp.SID -GroupName $grp.Name `
+            -DomainDN $domainDN -Server $dcName -AccountSID $accountSID | Out-Null
     }
 
-    # Check DnsAdmins (domain-specific, not built-in)
+    # Check DnsAdmins (domain-specific, no well-known SID — name is not localized)
     Test-GroupMembership -GroupName 'DnsAdmins' -DomainDN $domainDN `
         -Server $dcName -AccountSID $accountSID | Out-Null
 
