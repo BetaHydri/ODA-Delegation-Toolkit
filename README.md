@@ -17,9 +17,7 @@ These scripts are essential for **ODA Active Directory Assessment least-privileg
 | `Set-NetlogonPermissions.ps1` | Add or remove NTFS Read ACEs on `netlogon.dns` and `netlogon.log` | Per DC |
 | `Set-ADConvergenceRights.ps1` | Grant or revoke "Replicating Directory Changes" on domain naming contexts | Per domain |
 | `Set-SYSVOLWriteAccess.ps1` | Grant or revoke NTFS Modify on the SYSVOL domain root folder | Per domain |
-| `Set-DfsrReadAccess.ps1` | Grant or revoke Read on DFSR-GlobalSettings and NTDS Settings AD containers | Per domain |
-| `Process-DCs.ps1` | Orchestration script — runs AD-level delegations and per-DC permissions in two phases | All DCs |
-| `Get-ODADelegationStatus.ps1` | Audit all ODA delegation group memberships and per-DC permissions across the forest | Forest-wide |
+| `Process-DCs.ps1` | Orchestration script — loops through all DCs and applies WMI, SCM, and Netlogon permissions | All DCs |
 
 ## Why Multiple Scripts?
 
@@ -30,39 +28,8 @@ ODA AD Assessment collectors query multiple security layers on each domain contr
 3. **NTFS file ACLs** — Read access on `netlogon.dns` and `netlogon.log` (Backup Operators grants C$ share access, but standard .NET I/O does not activate `SeBackupPrivilege`)
 4. **AD extended rights** — "Replicating Directory Changes" on each domain NC for convergence testing
 5. **SYSVOL NTFS permissions** — Modify access on the SYSVOL domain root for DFS-R convergence measurement
-6. **DFSR / NTDS Settings AD objects** — Read on `CN=DFSR-GlobalSettings` (per domain) and `CN=Sites` in the Configuration partition for DFSR topology and NTDS Settings collectors
 
 Each script addresses one layer independently and is idempotent — running `add` when the ACE already exists will skip with a warning.
-
-## Step-by-step execution order
-
-You can either run `Process-DCs.ps1` (which orchestrates everything automatically) or execute the scripts manually in the order below.
-
-### Option A — Automated (recommended)
-
-Edit the variables at the top of `Process-DCs.ps1` (`$account`, `$dcs`, `$domainNCs`, `$configNC`, `$domainToDC`), then run:
-
-```powershell
-.\Process-DCs.ps1 -operation add
-```
-
-### Option B — Manual, step by step
-
-Run the scripts in this order from an admin workstation with Domain Admin or equivalent privileges.
-
-| Step | Script | Where to run | How often | What it does |
-| ---- | ------ | ------------ | --------- | ------------ |
-| 1 | `Set-ADConvergenceRights.ps1` | Admin workstation | Once per forest | Grants "Replicating Directory Changes" on all domain NCs |
-| 2 | `Set-SYSVOLWriteAccess.ps1` | Admin workstation | Once per domain | Grants NTFS Modify on the SYSVOL domain root (DFS-R replicates the ACL) |
-| 3 | `Set-DfsrReadAccess.ps1` | Admin workstation | Once per forest | Grants Read on DFSR-GlobalSettings and CN=Sites (NTDS Settings) |
-| 4 | `Set-WMINamespaceACL.ps1` | Each DC (locally or remotely) | Once per DC | Grants WMI namespace access on all required namespaces |
-| 5 | `Set-SCM_ACL.ps1` | Each DC (locally or remotely) | Once per DC | Grants SCM enumerate rights for `Win32_Service` queries |
-| 6 | `Set-NetlogonPermissions.ps1` | Each DC (locally) | Once per DC | Grants NTFS Read on `netlogon.dns` and `netlogon.log` |
-
-> **Steps 1–3** are AD-level / domain-level delegations — they only need to run once.
-> **Steps 4–6** are per-DC settings — they must be applied on every domain controller.
-
-To **revoke** all permissions, run the same scripts in reverse order with `-operation delete`.
 
 ## Set-WMINamespaceACL.ps1
 
@@ -280,51 +247,9 @@ Grants or revokes NTFS **Modify** permission on the SYSVOL domain root folder. T
 .\Set-SYSVOLWriteAccess.ps1 -operation delete -account "CONTOSO\ODA-Assessment-Readers"
 ```
 
-## Set-DfsrReadAccess.ps1
-
-Grants or revokes **Generic Read** on AD containers required by the DFSR and NTDS Settings
-collectors. Uses `dsacls.exe` to delegate access on:
-
-1. `CN=DFSR-GlobalSettings,CN=System,<domainNC>` (subtree) — per domain
-2. `CN=Sites,CN=Configuration,<forestRoot>` (subtree) — covers all NTDS Settings objects
-3. `CN=DFSR-GlobalSettings,CN=System,CN=Configuration,<forestRoot>` (subtree, if present)
-
-This is required when hardened AD environments have tightened the default DACLs on these
-containers, causing empty results for Dfsr_Info, Volume_Config, and NTDS_Settings collectors.
-
-> **Scope:** This is a domain-level operation. Run once from an admin workstation, not per DC.
-
-### DFSR parameters
-
-| Parameter | Required | Default | Description |
-| --------- | -------- | ------- | ----------- |
-| `-operation` | Yes | — | `add` or `delete` |
-| `-account` | Yes | — | Account in `DOMAIN\Name` format |
-| `-domainNCs` | No | Placeholder list | Array of domain NC distinguished names |
-| `-configNC` | No | Placeholder DN | Configuration partition DN |
-| `-logPath` | No | `$null` | Path to a log file for timestamped change entries |
-
-### DFSR examples
-
-```powershell
-# Grant Read on DFSR containers and Sites for all domains
-.\Set-DfsrReadAccess.ps1 -operation add -account "CONTOSO\ODA-Assessment-Readers"
-
-# Revoke delegated rights
-.\Set-DfsrReadAccess.ps1 -operation delete -account "CONTOSO\ODA-Assessment-Readers"
-```
-
 ## Process-DCs.ps1
 
-Orchestration script that applies the **full ODA delegation** in two phases:
-
-### Phase 1 — AD-level delegations (run once)
-
-- `Set-ADConvergenceRights.ps1` — "Replicating Directory Changes" on domain NCs
-- `Set-SYSVOLWriteAccess.ps1` — NTFS Modify on SYSVOL domain folders
-- `Set-DfsrReadAccess.ps1` — Read on DFSR-GlobalSettings containers and CN=Sites (NTDS Settings)
-
-### Phase 2 — Per-DC settings (via WinRM)
+Orchestration script that loops through a list of domain controllers and remotely applies **per-DC** permissions for a service account:
 
 - **WMI namespace ACLs** on `Root\CIMV2`, `Root\default`, `Root\MicrosoftActiveDirectory`, `Root\directory`, `Root\MicrosoftDFS`, `Root\MicrosoftDNS`
 - **SCM DACL** for `Win32_Service` access (`SC_MANAGER_CONNECT` + `SC_MANAGER_ENUMERATE_SERVICE`)
@@ -332,7 +257,9 @@ Orchestration script that applies the **full ODA delegation** in two phases:
 
 When the target DC is the local machine, the script runs locally to avoid WinRM loopback failures.
 
-Edit the `$account`, `$dcs`, `$domainNCs`, `$configNC`, and `$domainToDC` variables at the top of the script to match your environment.
+Edit the `$account` and `$dcs` variables at the top of the script to match your environment.
+
+> **Note:** `Set-ADConvergenceRights.ps1` and `Set-SYSVOLWriteAccess.ps1` are **not** included in `Process-DCs.ps1` — they are domain-level operations that only need to run once per domain, not per DC.
 
 ### Logging
 
@@ -342,41 +269,6 @@ Edit the `$account`, `$dcs`, `$domainNCs`, `$configNC`, and `$domainToDC` variab
 - `[OK]` or `[ERR]` status per domain controller and per setting
 - Timestamps for every entry
 - Summary counts at the end
-
-## Get-ODADelegationStatus.ps1
-
-Forest-wide **audit script** that verifies all ODA delegation settings are correctly applied. Run this after `Process-DCs.ps1` to confirm every permission layer is in place — or use it to diagnose failures when Sirona collectors report access-denied errors.
-
-### What it checks
-
-| Layer | Check | Method |
-| ----- | ----- | ------ |
-| Built-in groups | Event Log Readers, Performance Monitor Users, Distributed COM Users, Remote Management Users, Backup Operators, DnsAdmins | `Get-ADGroupMember` per domain (direct + one-level nested) |
-| SCM DACL | Account SID present in SCM SDDL | `sc.exe sdshow scmanager` via WinRM |
-| WMI namespace | `Root\CIMV2` accessible | `Get-WmiObject Win32_BIOS` via WinRM |
-| Win32_Service | DNS service queryable (SCM provider gate) | `Get-WmiObject Win32_Service WHERE Name='DNS'` via WinRM |
-| AD convergence | "Replicating Directory Changes" on each domain NC | `dsacls.exe` output parsing |
-
-### Audit Parameters
-
-| Parameter | Required | Default | Description |
-| --------- | -------- | ------- | ----------- |
-| `-Account` | Yes | — | The ODA service account or group to check (e.g. `DOM-TEST\ODA-Assessment-Readers`) |
-| `-LogPath` | No | `.\ODA-Delegation-Audit_<date>.log` | Path for the output report file |
-
-### Audit Examples
-
-```powershell
-# Full forest audit — report saved to default log file
-.\Get-ODADelegationStatus.ps1 -Account 'CHILD1\ODA-Assessment-Readers'
-
-# Custom log path
-.\Get-ODADelegationStatus.ps1 -Account 'CONTOSO\ODA-Assessment-Readers' -LogPath 'C:\Logs\oda-audit.log'
-```
-
-### Output
-
-The script produces color-coded console output and a structured log file with `[OK]`, `[ERR]`, and `[WARN]` prefixes for every check. Use the log file to identify exactly which permissions are missing on which DCs.
 
 ## Prerequisites
 

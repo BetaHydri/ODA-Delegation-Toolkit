@@ -1,2 +1,5 @@
 # Memory bank (local agent context, not for version control)
 .memory-bank/
+
+# Customer-specific samples (not for version control)
+ODA-Samples/
