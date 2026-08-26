@@ -1,4 +1,4 @@
-# Set-WMINamespaceACL
+# ODA Delegation Toolkit
 
 [![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207.x-blue?logo=powershell&logoColor=white)](https://learn.microsoft.com/powershell/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)

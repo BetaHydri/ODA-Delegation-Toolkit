@@ -328,7 +328,7 @@ This is the most critical step. WMI namespace security is **local to each machin
 
 #### Applying WMI ACLs with Set-WmiNamespaceSecurity.ps1
 
-Use the script from [BetaHydri/Set-WMINamespaceACL](https://github.com/BetaHydri/Set-WMINamespaceACL):
+Use the script from [BetaHydri/ODA-Delegation-Toolkit](https://github.com/BetaHydri/ODA-Delegation-Toolkit):
 
 ```powershell
 # Set WMI ACLs for all 5 namespaces
@@ -442,7 +442,7 @@ If the WMI namespace grants access but the SCM denies `SC_MANAGER_ENUMERATE_SERV
 
 #### Applying SCM DACL with Set-SCM_ACL.ps1
 
-Use the `Set-SCM_ACL.ps1` script from [BetaHydri/Set-WMINamespaceACL](https://github.com/BetaHydri/Set-WMINamespaceACL):
+Use the `Set-SCM_ACL.ps1` script from [BetaHydri/ODA-Delegation-Toolkit](https://github.com/BetaHydri/ODA-Delegation-Toolkit):
 
 ```powershell
 # Grant SCM enumerate access on a remote DC
@@ -1692,7 +1692,7 @@ so it moves rather than removes the exposure.
 
 | Resource | URL |
 |---|---|
-| Set-WMINamespaceACL / Set-SCM_ACL / Process-DCs / Set-NetlogonPermissions Scripts | <https://github.com/BetaHydri/Set-WMINamespaceACL> |
+| Set-WMINamespaceACL / Set-SCM_ACL / Process-DCs / Set-NetlogonPermissions Scripts | <https://github.com/BetaHydri/ODA-Delegation-Toolkit> |
 | Set-ADConvergenceRights / Set-SYSVOLWriteAccess Scripts | Included in the ODA Delegation Package |
 | ODA Setup Guide (OMSAssessment.exe, scheduled task) | <https://learn.microsoft.com/services-hub/health/getting_started_with_on_demand_assessments/oda-setup-guide.pdf> |
 | Privileged Access Management (time-bound group membership / TTL) | <https://learn.microsoft.com/windows-server/identity/ad-ds/manage/how-to-configure-privileged-access-management> |
