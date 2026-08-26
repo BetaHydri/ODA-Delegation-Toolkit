@@ -1633,6 +1633,61 @@ it is a full-forest compromise — exactly what hardened environments forbid.
 > the customer accepts hardening the data collection machine to Tier-0 / PAW grade (locked down,
 > restricted gMSA password retrieval, EA-change alerting, ideally approval-gated).
 
+#### 10.13.1 Which account runs the `-Mode FullEA` toggle?
+
+A recurring design question: *must the Enterprise Admins grant/revoke be automated by a static
+Domain Admin account, or can we keep the number of Tier-0 accounts to a minimum?*
+
+**The executor does not have to be a static human DA — but it is unavoidably a *standing*
+Tier-0 identity.** Membership of `Enterprise Admins` cannot be delegated to a lower tier:
+
+- `Enterprise Admins` is **AdminSDHolder-protected**. A delegated *write member* ACE placed on
+  the group is **stripped by SDProp within ~60 minutes**, so no durable sub-Tier-0 delegation
+  is possible.
+- Whoever can write the `member` attribute of EA can add themselves to EA, i.e. is
+  EA-equivalent. There is no "write-member-only, not really admin" middle ground for protected
+  groups. (The same is true of `Backup Operators` in the granular variant — see Section 10.9.)
+
+So the JIT chain must terminate at a standing Tier-0 principal. Make that principal a single,
+locked-down, non-interactive **automation gMSA** rather than a human account:
+
+| Requirement | Setting |
+|---|---|
+| Identity | Dedicated gMSA `svc-ODA-JIT$` (a.k.a. `gMSA-ODA-JIT$`) — this automation only |
+| Standing rights | Member of a forest-root Tier-0 group (Administrators / Domain Admins / Enterprise Admins) so the EA write survives SDProp |
+| Password retrieval | `PrincipalsAllowedToRetrieveManagedPassword` limited to the single PAW / management host |
+| Logon rights (GPO) | `Deny log on locally` + `Deny log on through RDP` (never interactive); `Log on as a batch job` only, on that PAW. **Do not** blanket-deny network logon — see the note below |
+| Host | Runs on a hardened Tier-0 management server / PAW — never the collector |
+| Auditing | 4728/4729 EA membership-change alerts + grant/revoke task-failure alerts |
+
+> **Two different gMSAs — do not confuse their network-logon needs.** *"Deny access to this
+> computer from the network"* must **not** be applied blanket to either account, because both
+> depend on network logon:
+>
+> - The **assessment gMSA** (ODA collection account) authenticates *from the collector to every
+>   DC and DNS server* over remote WMI / RPC / LDAP / SMB. It **requires** the *Access this
+>   computer from the network* right on all of those targets — denying it breaks the assessment
+>   entirely. Harden it via deny interactive/RDP, password retrieval scoped to the collector
+>   host only, the PAM-TTL elevation window, and EA-change alerting — not via a network-logon
+>   deny on the DCs.
+> - The **executor gMSA** (`svc-ODA-JIT$`) performs an *outbound LDAP write to a forest-root DC*
+>   to toggle the membership, so it likewise needs network logon **on that DC**; it runs as a
+>   scheduled (batch) task on the PAW.
+>
+> Apply *Deny access to this computer from the network* for these Tier-0 accounts only on
+> **Tier-1 / Tier-2 machines** to block lateral reuse — never on the DCs / DNS servers each
+> account must legitimately reach.
+
+**How many Tier-0 accounts does this cost?** Exactly **one** new *standing* Tier-0 identity —
+the automation gMSA. The **assessment gMSA holds zero standing Tier-0 rights** and is elevated
+only during the weekly window. The account *count* is identical for the granular and FullEA
+variants; only the **breadth** of the transient elevation differs (scoped subset vs. full EA).
+The least-privilege lever is therefore the **variant**, not the executor: keep the one
+automation gMSA and prefer the granular hybrid (10.3) to minimise the assessment gMSA's weekly
+blast radius. If an even smaller standing footprint is required, the only way to make the
+executor itself non-standing is an external PAM / MIM bastion forest — which is itself Tier-0,
+so it moves rather than removes the exposure.
+
 ## 11. References
 
 | Resource | URL |

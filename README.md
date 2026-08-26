@@ -403,6 +403,53 @@ the member.
 > `-Mode FullEA` only when the customer accepts treating the data collection machine as a
 > Tier-0 asset (locked down, restricted gMSA password retrieval, EA-change alerting).
 
+#### Which account automates the `-Mode FullEA` toggle?
+
+**It does not have to be a static human Domain Admin — but it must be a *standing* Tier-0
+identity.** You cannot delegate "manage Enterprise Admins membership" down to a lower tier:
+`Enterprise Admins` is an **AdminSDHolder-protected** group, so any delegated *write member*
+ACE you add is **reverted by SDProp within ~60 minutes**. Being able to write the `member`
+attribute of EA is equivalent to being EA (you could add yourself), so the executor is Tier-0
+by definition. This is the same constraint that already applies to `-Mode Granular` (Backup
+Operators is likewise AdminSDHolder-protected).
+
+Use a dedicated, non-interactive **Tier-0 automation gMSA** instead of a human account:
+
+| Requirement | Setting |
+| ----------- | ------- |
+| Identity | Dedicated gMSA, e.g. `svc-ODA-JIT$` — used **only** for this automation |
+| Standing rights | Member of a forest-root Tier-0 group (Administrators / Domain Admins / Enterprise Admins) so its write survives SDProp |
+| Password retrieval | `PrincipalsAllowedToRetrieveManagedPassword` = the one PAW / Tier-0 orchestration host computer account only |
+| Logon rights (GPO) | `Deny log on locally` + `Deny log on through RDP` (it never logs on interactively); allow only `Log on as a batch job` on that PAW. **Do not** blanket-deny network logon — see the note below |
+| Runs on | A hardened Tier-0 PAW / management host — never the collector |
+| Auditing | Alert on 4728/4729 (EA membership change) and on grant/revoke task failure |
+
+> **Two different gMSAs — don't confuse their network needs.** *"Deny access to this computer
+> from the network"* must **not** be applied blanket to either account, because both rely on
+> network logon:
+>
+> - **Assessment gMSA** (the ODA collection account): authenticates *from the collector to every
+>   DC and DNS server* (remote WMI / RPC / LDAP / SMB). It **requires** *Access this computer
+>   from the network* on all those targets — denying network logon breaks collection entirely.
+>   Harden it instead via deny interactive/RDP, scoped password retrieval (collector host only),
+>   the PAM-TTL elevation, and EA-change alerting.
+> - **Executor gMSA** (`svc-ODA-JIT$`): makes an *outbound LDAP write to a forest-root DC* to
+>   toggle the membership, so it also needs network logon **on that DC**. It runs as a scheduled
+>   task on the PAW (batch logon).
+>
+> Apply *Deny access to this computer from the network* to these Tier-0 accounts only on
+> **Tier-1 / Tier-2 machines** (to block lateral reuse), never on the DCs / DNS servers each
+> account must legitimately reach.
+
+**Minimising Tier-0 accounts.** With this design you add exactly **one** new *standing* Tier-0
+identity (the automation gMSA). The assessment gMSA holds **zero** standing Tier-0 rights — it
+is elevated only for the ~1–2 h weekly window. The account *count* is the same for `Granular`
+and `FullEA`; the difference is the **breadth** of the transient elevation (a scoped subset vs.
+full Enterprise Admins). So the real lever for least privilege is the **variant choice**, not
+the executor: keep the single automation gMSA and prefer `-Mode Granular` to shrink the
+assessment gMSA's weekly blast radius. Whatever automates EA membership is unavoidably a
+standing Tier-0 principal — the best you can do is make it one locked-down gMSA on a PAW.
+
 ## Prerequisites
 
 - Windows OS
