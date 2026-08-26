@@ -322,6 +322,63 @@ that runs this script is therefore effectively **Tier-0**. The security win is t
 *assessment gMSA* no longer holds standing Tier-0 rights — run this script as a dedicated,
 locked-down automation gMSA on a Tier-0 / PAW host only.
 
+### JIT automation architecture (identity separation)
+
+The key design principle is **two separate gMSAs**: the collector never holds standing Tier-0
+rights, while a dedicated automation identity does the privileged toggling from a hardened host.
+
+```mermaid
+flowchart TB
+    subgraph TIER0["🔒 Tier-0 / PAW host (hardened, never the collector)"]
+        direction TB
+        EXEC["<b>Executor automation gMSA</b><br/>svc-ODA-JIT$<br/><i>standing Tier-0</i> (member of EA / DA)"]
+        GRANT["JIT-Grant task<br/>time trigger @ T − 15 min"]
+        REVOKE["JIT-Revoke task<br/>event trigger (102 / 4689)"]
+        EXEC --> GRANT
+        EXEC --> REVOKE
+    end
+
+    subgraph AD["🗂️ Active Directory — forest root"]
+        direction TB
+        EA["<b>-Mode FullEA:</b> Enterprise Admins<br/>——— or ———<br/><b>-Mode Granular:</b> Backup Operators +<br/>SYSVOL Write + Replicating Directory Changes"]
+    end
+
+    subgraph COLLECTOR["📊 ODA Collector Server (Tier-1)"]
+        direction TB
+        ASSESS["<b>Assessment gMSA</b><br/>ODA-gMSA$<br/><i>ZERO standing Tier-0</i>"]
+        OMS["OMSAssessment.exe<br/>weekly scheduled task (~1–2 h)"]
+        ASSESS --> OMS
+    end
+
+    GRANT ==>|"add member (PAM TTL)"| EA
+    REVOKE ==>|"remove member"| EA
+    EA -.->|"elevates ONLY during the window"| ASSESS
+    OMS ==>|"collect WMI / WinRM / LDAP"| DCS["All Domain Controllers"]
+```
+
+**Weekly timing (Kerberos-driven):**
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant G as JIT-Grant (executor gMSA)
+    participant AD as Forest root AD
+    participant O as OMSAssessment.exe (assessment gMSA)
+    participant R as JIT-Revoke (executor gMSA)
+    Note over G,R: T = fixed weekly assessment start time
+    G->>AD: T-15min · add Tier-0 membership (PAM TTL = window + buffer)
+    O->>AD: T · authenticate, TGT minted INCLUDING the JIT rights
+    O->>O: T…T+~90m · collect from all DCs
+    O-->>R: T+~90m · completion event 102 / 4689 fires
+    R->>AD: remove ACL rights (membership auto-expires via PAM TTL)
+    Note over AD: T+buffer · PAM TTL expiry = safety backstop if revoke never runs
+```
+
+> **Why the grant must be time-based, not event-based:** Backup Operators / Enterprise Admins is
+> a *group membership* baked into the gMSA's Kerberos ticket **when `OMSAssessment.exe`
+> authenticates**. Granting it *after* the process starts has no effect on the running
+> collection — so the grant fires at `T − 15 min`, before the token is minted.
+
 ### Parameters
 
 | Parameter | Required | Default | Description |

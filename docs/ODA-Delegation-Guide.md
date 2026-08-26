@@ -39,28 +39,24 @@ A comparison of the baseline assessment (2026-04-27, full DA rights) against the
 
 ## 2. Architecture Overview
 
-```
- ODA Collector Server (ODASRV01)
- ┌──────────────────────────────────────────┐
- │  Sirona Engine                           │
- │  runs as: gMSA (CONTOSO\ODA-gMSA$)      │
- │                                          │
- │  Collectors:                             │
- │   ├─ WMI (DCOM) ──────────────────────►  │ All DCs
- │   ├─ WinRM (PSRemoting) ─────────────►  │ All DCs
- │   └─ LDAP ───────────────────────────►  │ All DCs
- └──────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    subgraph COL["ODA Collector Server (ODASRV01)"]
+        direction TB
+        SIRONA["Sirona Engine<br/>runs as gMSA: CONTOSO\ODA-gMSA$"]
+        SIRONA --> WMI["WMI (DCOM)"]
+        SIRONA --> WINRM["WinRM (PSRemoting)"]
+        SIRONA --> LDAP["LDAP"]
+    end
 
- Domain Controllers (13 DCs across 7 domains)
- ┌──────────────────────────────────────────┐
- │  Required on EACH DC:                    │
- │   ├─ WMI Namespace ACLs (3 namespaces)  │
- │   ├─ DCOM Launch/Access Permissions     │
- │   ├─ Event Log Readers (local group)    │
- │   ├─ Remote Management Users            │
- │   ├─ Performance Monitor Users          │
- │   └─ Distributed COM Users             │
- └──────────────────────────────────────────┘
+    subgraph DCS["Domain Controllers (13 DCs across 7 domains)"]
+        direction TB
+        REQ["Required on EACH DC:<br/>• WMI Namespace ACLs (6 namespaces)<br/>• DCOM Launch / Access Permissions<br/>• Event Log Readers (local group)<br/>• Remote Management Users<br/>• Performance Monitor Users<br/>• Distributed COM Users"]
+    end
+
+    WMI ==>|"all DCs"| REQ
+    WINRM ==>|"all DCs"| REQ
+    LDAP ==>|"all DCs"| REQ
 ```
 
 ## 3. Prerequisites
@@ -87,34 +83,24 @@ New-ADServiceAccount -Name 'ODA-gMSA' `
 
 Since the gMSA exists in only one domain but must have permissions on DCs in all child domains, use the **AGDLP** (Account → Global → Domain Local → Permission) nesting pattern:
 
+```mermaid
+flowchart TD
+    GMSA["gMSA: ODA-gMSA$<br/>(forest root: contoso.com)"]
+    GG["ODA-Assessment-Readers<br/><i>Global group — forest root</i>"]
+    GMSA -->|member of| GG
+
+    GG -->|nested into| DL1["ODA-DC-Readers<br/><i>Domain Local — contoso.com</i>"]
+    GG -->|nested into| DL2["ODA-DC-Readers<br/><i>Domain Local — child1</i>"]
+    GG -->|nested into| DLN["ODA-DC-Readers<br/><i>Domain Local — child5</i>"]
+
+    BUILTIN["Added to built-in groups on each domain's DCs:<br/>• Backup Operators<br/>• Event Log Readers<br/>• Distributed COM Users<br/>• Performance Monitor Users<br/>• Remote Management Users"]
+
+    DL1 --> BUILTIN
+    DL2 --> BUILTIN
+    DLN --> BUILTIN
 ```
- Forest Root: contoso.com
- ┌─────────────────────────────────────────────────┐
- │  gMSA: ODA-gMSA$                      │
- │    └─ member of: ODA-Assessment-Readers (Global)│
- └──────────────────────┬──────────────────────────┘
-                        │ nested into
-          ┌─────────────┼─────────────────────┐
-          ▼             ▼                     ▼
- ┌────────────┐  ┌────────────┐       ┌────────────┐
- │ contoso.com│  │ child1     │  ...  │ child5     │
- │ DL: ODA-   │  │ DL: ODA-   │       │ DL: ODA-   │
- │ DC-Readers │  │ DC-Readers │       │ DC-Readers │
- └────────────┘  └────────────┘       └────────────┘
-       │               │                    │
-       ▼               ▼                    ▼
-  Added to:        Added to:           Added to:
-  - Backup         - Backup            - Backup
-    Operators        Operators            Operators
-  - Event Log      - Event Log         - Event Log
-    Readers          Readers              Readers
-  - Distributed    - Distributed       - Distributed
-    COM Users        COM Users            COM Users
-  - Performance    - Performance       - Performance
-    Monitor Users    Monitor Users        Monitor Users
-  - Remote Mgmt    - Remote Mgmt       - Remote Mgmt
-    Users            Users                Users
-```
+
+> The `...` between `child1` and `child5` represents the remaining child domains — every child domain gets its own **Domain Local** `ODA-DC-Readers` group following the same pattern.
 
 #### Step-by-step setup:
 
