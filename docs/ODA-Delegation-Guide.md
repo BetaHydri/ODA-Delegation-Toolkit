@@ -10,6 +10,8 @@ toc-depth: 3
 
 # ODA AD Assessment — Least-Privilege Delegation Guide
 
+**🌐 Language:** English · [Deutsch](ODA-Delegation-Guide.de.md)
+
 ## 1. Executive Summary
 
 This document describes how to delegate the minimum required permissions for the Microsoft **On-Demand Assessment (ODA)** AD Assessment to a **Group Managed Service Account (gMSA)** — eliminating the need for Domain Admin or Enterprise Admin credentials.
