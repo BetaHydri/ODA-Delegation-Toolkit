@@ -18,6 +18,7 @@ These scripts are essential for **ODA Active Directory Assessment least-privileg
 | `Set-ADConvergenceRights.ps1` | Grant or revoke "Replicating Directory Changes" on domain naming contexts | Per domain |
 | `Set-SYSVOLWriteAccess.ps1` | Grant or revoke NTFS Modify on the SYSVOL domain root folder | Per domain |
 | `Process-DCs.ps1` | Orchestration script — loops through all DCs and applies WMI, SCM, and Netlogon permissions | All DCs |
+| `Invoke-ODAJitDelegation.ps1` | **JIT alternative** — grants/revokes only the Tier-0 / write-capable rights (Backup Operators, SYSVOL Write, Replicating Directory Changes) around the weekly assessment window | Forest (JIT) |
 
 ## Why Multiple Scripts?
 
@@ -270,11 +271,145 @@ Edit the `$account` and `$dcs` variables at the top of the script to match your 
 - Timestamps for every entry
 - Summary counts at the end
 
+## Invoke-ODAJitDelegation.ps1 (Just-In-Time alternative)
+
+A **documented alternative** to the standing delegation. Instead of leaving every permission
+assigned 24/7, the sensitive, Tier-0 / write-capable rights are granted **immediately before**
+each weekly assessment run and revoked (or auto-expired) **immediately after**. This implements
+*least privilege over time* in addition to *least privilege of scope*.
+
+The ODA AD Assessment runs as a **weekly scheduled task** that launches `OMSAssessment.exe`
+(per the ODA setup guide), so it is only active ~1–2 hours per week. JIT removes the standing
+exposure during the other ~166 hours.
+
+### What it JITs (and what it does not)
+
+| Right | JIT? | Why |
+| ----- | ---- | --- |
+| Backup Operators membership | **Yes** | Tier-0 group; highest-risk item |
+| SYSVOL Write (NTFS Modify) | **Yes** | Write-capable resource ACL |
+| Replicating Directory Changes | **Yes** | Write-capable extended right |
+| WMI/SCM ACLs, DCOM/WinRM, Event Log Readers, DNS/DFSR read | **No — keep standing** | Read-only; toggling every week adds fragility for no security benefit |
+
+The script reuses `Set-ADConvergenceRights.ps1` and `Set-SYSVOLWriteAccess.ps1` and manages the
+Backup Operators membership directly (with a PAM Time-To-Live on `add`).
+
+### ⚠ Kerberos token timing (the key design fact)
+
+**Group memberships** (Backup Operators) are baked into the gMSA's Kerberos ticket when
+`OMSAssessment.exe` authenticates and are cached for up to **10 hours**. Granting the
+membership *after* the process has started has **no effect on the running collection**.
+Therefore:
+
+- Run **`-operation add` on a TIME trigger ~15 min before** the fixed weekly window (read the
+  window from the assessment scheduled task — see below). **Not** on an "OMSAssessment.exe
+  started" event — by then the token is already minted.
+- Run **`-operation delete` on an EVENT trigger** when the assessment finishes
+  (Task Scheduler Operational event `102`, or Security `4689` for `OMSAssessment.exe` exit),
+  and/or as a time-based safety net.
+- On `add`, the membership is granted with `-MemberTimeToLive` (PAM) so it **auto-expires**
+  even if the revoke never runs. Requires Forest Functional Level 2016+ and the PAM optional
+  feature; set `-usePamTtl $false` on older forests and rely on the revoke.
+
+**Resource ACLs** (SYSVOL, Replicating Directory Changes) target the permanent group and take
+effect/removal immediately at the resource — no token refresh needed.
+
+### Executor privilege (be honest)
+
+Adding/removing Backup Operators (an AdminSDHolder-protected group), `dsacls` on the domain NC,
+and `icacls` on SYSVOL all require **Domain/Enterprise Admin-equivalent** rights. The identity
+that runs this script is therefore effectively **Tier-0**. The security win is that the
+*assessment gMSA* no longer holds standing Tier-0 rights — run this script as a dedicated,
+locked-down automation gMSA on a Tier-0 / PAW host only.
+
+### Parameters
+
+| Parameter | Required | Default | Description |
+| --------- | -------- | ------- | ----------- |
+| `-operation` | Yes | — | `add` (grant, pre-window) or `delete` (revoke, on completion) |
+| `-Mode` | No | `Granular` | `Granular` = JIT subset; `FullEA` = single Enterprise Admins toggle (Variant C) |
+| `-account` | No | Placeholder | Global group holding the gMSA, `DOMAIN\Name` (for the ACLs) |
+| `-groupDN` | No | Placeholder | DN of that group (for cross-domain Backup Operators / EA write) |
+| `-backupOperatorsDomains` | No | Placeholder list | Domain FQDNs whose Backup Operators group is toggled |
+| `-ttlHours` | No | `3` | PAM Time-To-Live for the membership on `add` (window + buffer) |
+| `-usePamTtl` | No | `$true` | Use `-MemberTimeToLive` (FFL 2016+); `$false` = rely on revoke |
+| `-domainNCs` | No | Placeholder list | Domain NCs for Replicating Directory Changes |
+| `-domainToDC` | No | Placeholder hashtable | Domain → one DC FQDN for SYSVOL write |
+| `-forestRootServer` | No | Placeholder | Forest root DC for the Enterprise Admins write (`-Mode FullEA`) |
+| `-logPath` | No | Auto | Log file (`JIT-Delegation_<op>_<timestamp>.log`) |
+
+### Examples
+
+```powershell
+# Grant — schedule ~15 min before the weekly assessment window
+.\Invoke-ODAJitDelegation.ps1 -operation add
+
+# Revoke — trigger on assessment completion (event 102 / 4689), also run as a safety net
+.\Invoke-ODAJitDelegation.ps1 -operation delete
+```
+
+### Wiring the triggers
+
+Read the fixed weekly window from the assessment task (do **not** hardcode a task name — it is
+created per assessment during ODA setup):
+
+```powershell
+$oda = Get-ScheduledTask | Where-Object { $_.Actions.Execute -match 'OMSAssessment\.exe' }
+([datetime]($oda.Triggers | Select-Object -First 1).StartBoundary)   # = weekly time T
+```
+
+- **Grant task**: weekly time trigger at `T − 15 min`, action `Invoke-ODAJitDelegation.ps1 -operation add`.
+- **Revoke task**: event trigger on `Microsoft-Windows-TaskScheduler/Operational` event `102`
+  (or Security `4689` for `OMSAssessment.exe`), action `Invoke-ODAJitDelegation.ps1 -operation delete`.
+- Run the privileged action on a hardened Tier-0 / management host; use **Windows Event
+  Forwarding** if the trigger source is the collector server.
+
+> A full walkthrough (event XML, task XML, self-syncing schedule, comparison tables) is in
+> Section 10 "Just-In-Time (JIT) Delegation Model" of the
+> [ODA delegation guide](docs/ODA-Delegation-Guide.md).
+
+### Variant C — Full elevation (Enterprise Admin) with `-Mode FullEA`
+
+Microsoft's **documented** prerequisite for the AD On-Demand Assessment account is
+**Enterprise Administrator** plus administrative access to every DC and DNS server
+([Getting Started with AD ODA](https://learn.microsoft.com/services-hub/unified/health/getting-started-ad)).
+`-Mode FullEA` **time-boxes that documented requirement**: instead of the granular subset it
+toggles a single **Enterprise Admins** membership in the forest root with a PAM TTL.
+
+```powershell
+# Grant EA ~15 min before the window; revoke on completion / let the TTL expire
+.\Invoke-ODAJitDelegation.ps1 -operation add    -Mode FullEA
+.\Invoke-ODAJitDelegation.ps1 -operation delete -Mode FullEA
+```
+
+**Pros**: one toggle, no per-DC / ACL work, trivially 100% data parity with the DA/EA baseline.
+
+**Cons / decision point**: Enterprise Admins in the forest root cascades into `Administrators`
+of every domain, so during the window the **assessment gMSA — and therefore the collector
+server that can retrieve its password — is effectively Tier-0**. If that collector is
+compromised (or the weekly window is abused), it is a full-forest compromise. The same Kerberos
+timing applies (grant *before* the task authenticates), and the executor still needs EA to add
+the member.
+
+| | `-Mode Granular` (default) | `-Mode FullEA` |
+| --- | --- | --- |
+| Rights toggled | Backup Operators + SYSVOL + Repl. Dir. Changes | Enterprise Admins (forest root) |
+| Data parity | High (matches the granular delegation) | 100% (matches the DA/EA baseline) |
+| Collector trust tier during window | Tier-1 with scoped Tier-0 sub-rights | **Full Tier-0** |
+| Use when | Hardened env forbids the collector holding Tier-0 | Collector is treated as a Tier-0 / PAW asset |
+| Complexity | Medium (reuses the package scripts) | Lowest (one membership) |
+
+> **Recommendation**: prefer `-Mode Granular` in hardened / regulated environments. Use
+> `-Mode FullEA` only when the customer accepts treating the data collection machine as a
+> Tier-0 asset (locked down, restricted gMSA password retrieval, EA-change alerting).
+
 ## Prerequisites
 
 - Windows OS
 - PowerShell 5.1 or 7.x
 - **Administrator** privileges (required to modify WMI namespace security and SCM DACL)
+- For `Invoke-ODAJitDelegation.ps1`: the **ActiveDirectory** module (RSAT), a **Tier-0**
+  executor identity, and (recommended) **PAM** enabled (Forest Functional Level 2016+)
 
 ## License
 
