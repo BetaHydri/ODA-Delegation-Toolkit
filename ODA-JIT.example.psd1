@@ -13,7 +13,7 @@
     ExecutorAccount    = 'CONTOSO\svc-ODA-JIT$'
 
     # --- Collector / ODA ------------------------------------------------------------------
-    Collector          = 'ODA-COL-CONTOSO.child1.contoso.com'
+    Collector          = 'ODA-COL-CONTOSO.child1.contoso.com'   # FQDN of the on-prem server (not the Azure Arc resource name)
     WorkingDirectory   = 'C:\Assessments'                  # ODA WorkingDirectory on the collector
     OdaTaskNames       = @('ADAssessment', 'ADSecurityAssessment')
     OdaProcessNames    = @('OMSAssessment.exe')
