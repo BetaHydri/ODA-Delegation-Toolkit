@@ -144,7 +144,7 @@ WinRM ist auf Windows Server standardmäßig aktiv. Prüfen kann man das vom Tie
 | Recht | Wo | Warum |
 | ----- | -- | ----- |
 | Mitglied in **Domain Admins der Forest-Root-Domäne** (oder Enterprise Admins) | AD | Enterprise Admins ist durch AdminSDHolder geschützt; delegierte Schreibrechte setzt SDProp nach ~60 min zurück. Nur ein Tier-0-Konto kann die Mitgliedschaft dauerhaft ändern |
-| **Lokaler Administrator** auf dem Collector-Server | Collector | CIM-Abfrage der geplanten Aufgaben und Lesen von `C$`. Domain Admins der Root-Domäne sind auf Servern einer Child-Domäne **nicht** automatisch Admin |
+| **Lokaler Administrator** auf dem Collector-Server | Collector-Server (on-prem, Windows) – **nicht** das Arc-Objekt, keine Azure-Rolle | Der Watcher fragt vom Tier-0-Host per WinRM/CIM die geplanten Aufgaben und `OMSAssessment.exe` ab und liest per SMB `C$`. Domain Admins der Root-Domäne sind auf Servern einer Child-Domäne **nicht** automatisch lokaler Admin |
 | **Als Stapelverarbeitungsauftrag anmelden** (Log on as a batch job) | Tier-0-Host | Die geplanten Aufgaben laufen als Batch-Anmeldung |
 | Lesen auf `C:\ODA-JIT`, Ändern auf `C:\ODA-JIT\Logs` | Tier-0-Host | Skripte/Konfiguration lesen, Logs schreiben |
 | Kennwortabruf nur durch den Tier-0-Host | AD (`PrincipalsAllowedToRetrieveManagedPassword`) | Nur dieser Host kann das Konto verwenden |
@@ -364,8 +364,8 @@ darf, und genau das widerspricht der Forest-Trennung. **Nicht empfohlen.**
 | Grant Exit 1 / Event 1001 „FAILED“ | Ausführer ohne Rechte auf Enterprise Admins, `ForestRootServer` nicht erreichbar | Mitgliedschaft in Domain Admins der Root-Domäne prüfen; TCP 9389 |
 | Grant Exit 2 / Event 1001 „NOT visible on GC“ | Replikation zum GC im Collector-Standort fehlt | `SiteGlobalCatalogs` prüfen, `repadmin /showrepl`, TCP 9389 zu den GCs |
 | Fehler bei `-MemberTimeToLive` | PAM-Feature nicht aktiv | PAM aktivieren (2.4) oder `UsePamTtl = $false` |
-| Watcher: „Collector query failed“ | WinRM gesperrt oder Ausführer nicht lokaler Admin | `Test-WSMan`, Firewall 5985, Schritt 3 |
-| Watcher: „Result file check failed“ | Kein Zugriff auf `C$` | Firewall 445, lokaler Admin, `WorkingDirectory` prüfen |
+| Watcher: „Collector query failed“ | WinRM gesperrt oder Ausführer nicht lokaler Admin auf dem Collector-Server | `Test-WSMan`, Firewall 5985, Schritt 3 |
+| Watcher: „Result file check failed“ | Kein Zugriff auf `C$` des Collector-Servers | Firewall 445, lokaler Admin auf dem Collector-Server, `WorkingDirectory` prüfen |
 | Watcher endet immer mit Deadline (Event 1012) | Zeitplan der ODA-Aufgaben passt nicht zu `WindowDay`/`WindowStart`, falsche `OdaTaskNames` | Schritt 6; Log zeigt `Missing=[…]` |
 | Keine Events im Application-Log | Ereignisquelle fehlt | `Register-ODAJitTasks.ps1` als Administrator ausführen |
 | Skript startet nicht („nicht digital signiert“) | Internet-Kennzeichnung oder `AllSigned` ohne Signatur | `Unblock-File` bzw. Skripte signieren |

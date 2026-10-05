@@ -141,7 +141,7 @@ WinRM is enabled by default on Windows Server. Check from the Tier-0 host with
 | Right | Where | Why |
 | ----- | ----- | --- |
 | Member of **Domain Admins of the forest root domain** (or Enterprise Admins) | AD | Enterprise Admins is AdminSDHolder-protected; SDProp reverts delegated write ACEs within ~60 min. Only a Tier-0 account can change the membership durably |
-| **Local administrator** on the collector server | Collector | CIM query of the scheduled tasks and reading `C$`. Root-domain Domain Admins are **not** automatically admins on child-domain servers |
+| **Local administrator** on the collector server | Collector server (on-prem, Windows) – **not** the Arc resource, no Azure role | From the Tier-0 host the watcher queries the scheduled tasks and `OMSAssessment.exe` via WinRM/CIM and reads `C$` via SMB. Root-domain Domain Admins are **not** automatically local admins on child-domain servers |
 | **Log on as a batch job** | Tier-0 host | The scheduled tasks run as batch logons |
 | Read on `C:\ODA-JIT`, modify on `C:\ODA-JIT\Logs` | Tier-0 host | Read scripts/configuration, write logs |
 | Password retrieval only by the Tier-0 host | AD (`PrincipalsAllowedToRetrieveManagedPassword`) | Only this host can use the account |
@@ -360,8 +360,8 @@ contradicts the forest separation. **Not recommended.**
 | Grant exit 1 / event 1001 "FAILED" | Executor lacks rights on Enterprise Admins, `ForestRootServer` unreachable | Check membership in root-domain Domain Admins; TCP 9389 |
 | Grant exit 2 / event 1001 "NOT visible on GC" | Replication to the GC in the collector's site missing | Check `SiteGlobalCatalogs`, `repadmin /showrepl`, TCP 9389 to the GCs |
 | Error on `-MemberTimeToLive` | PAM feature not enabled | Enable PAM (2.4) or `UsePamTtl = $false` |
-| Watcher: "Collector query failed" | WinRM blocked or executor not local admin | `Test-WSMan`, firewall 5985, step 3 |
-| Watcher: "Result file check failed" | No access to `C$` | Firewall 445, local admin, check `WorkingDirectory` |
+| Watcher: "Collector query failed" | WinRM blocked or executor not local admin on the collector server | `Test-WSMan`, firewall 5985, step 3 |
+| Watcher: "Result file check failed" | No access to the collector server's `C$` | Firewall 445, local admin on the collector server, check `WorkingDirectory` |
 | Watcher always ends at the deadline (event 1012) | ODA task schedule does not match `WindowDay`/`WindowStart`, wrong `OdaTaskNames` | Step 6; the log shows `Missing=[…]` |
 | No events in the Application log | Event source missing | Run `Register-ODAJitTasks.ps1` elevated |
 | Script does not start ("not digitally signed") | Internet mark or `AllSigned` without signature | `Unblock-File` or sign the scripts |
