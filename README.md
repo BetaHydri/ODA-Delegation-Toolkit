@@ -481,7 +481,7 @@ Use a dedicated, non-interactive **Tier-0 automation gMSA** instead of a human a
 | Password retrieval | `PrincipalsAllowedToRetrieveManagedPassword` = the one PAW / Tier-0 orchestration host computer account only |
 | Logon rights (GPO) | `Deny log on locally` + `Deny log on through RDP` (it never logs on interactively); allow only `Log on as a batch job` on that PAW. **Do not** blanket-deny network logon — see the note below |
 | Runs on | A hardened Tier-0 PAW / management host — never the collector |
-| Auditing | Alert on 4728/4729 (EA membership change) and on grant/revoke task failure |
+| Auditing | Alert on 4756/4757 (EA membership change — Enterprise Admins is a universal group) and on grant/revoke task failure |
 
 > **Two different gMSAs — don't confuse their network needs.** *"Deny access to this computer
 > from the network"* must **not** be applied blanket to either account, because both rely on

@@ -1646,7 +1646,7 @@ locked-down, non-interactive **automation gMSA** rather than a human account:
 | Password retrieval | `PrincipalsAllowedToRetrieveManagedPassword` limited to the single PAW / management host |
 | Logon rights (GPO) | `Deny log on locally` + `Deny log on through RDP` (never interactive); `Log on as a batch job` only, on that PAW. **Do not** blanket-deny network logon — see the note below |
 | Host | Runs on a hardened Tier-0 management server / PAW — never the collector |
-| Auditing | 4728/4729 EA membership-change alerts + grant/revoke task-failure alerts |
+| Auditing | 4756/4757 EA membership-change alerts (universal group) + grant/revoke task-failure alerts |
 
 > **Two different gMSAs — do not confuse their network-logon needs.** *"Deny access to this
 > computer from the network"* must **not** be applied blanket to either account, because both

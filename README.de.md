@@ -435,7 +435,7 @@ Verwenden Sie ein dediziertes, nicht-interaktives **Tier-0-Automatisierungs-gMSA
 | Passwortabruf | `PrincipalsAllowedToRetrieveManagedPassword` = nur das eine PAW-/Tier-0-Orchestrierungs-Host-Computerkonto |
 | Anmelderechte (GPO) | `Lokale Anmeldung verweigern` + `Anmelden über RDP verweigern` (meldet sich nie interaktiv an); nur `Anmelden als Batchauftrag` auf diesem PAW erlauben. Netzwerkanmeldung **nicht** pauschal verweigern — siehe Hinweis unten |
 | Ausführung auf | Einem gehärteten Tier-0-PAW-/Management-Host — niemals dem Collector |
-| Auditing | Alarmierung bei 4728/4729 (EA-Mitgliedschaftsänderung) und bei Fehlschlag der Grant-/Revoke-Aufgabe |
+| Auditing | Alarmierung bei 4756/4757 (EA-Mitgliedschaftsänderung – Enterprise Admins ist eine universelle Gruppe) und bei Fehlschlag der Grant-/Revoke-Aufgabe |
 
 > **Zwei verschiedene gMSAs — verwechseln Sie ihre Netzwerkanforderungen nicht.** *„Zugriff auf diesen Computer über das Netzwerk verweigern"* darf **nicht** pauschal auf eines der beiden Konten angewendet werden, da beide auf Netzwerkanmeldung angewiesen sind:
 >

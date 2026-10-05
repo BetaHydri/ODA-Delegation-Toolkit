@@ -1552,7 +1552,7 @@ Die JIT-Kette muss also bei einem dauerhaften Tier-0-Principal enden. Machen Sie
 | Kennwortabruf | `PrincipalsAllowedToRetrieveManagedPassword` auf den einzigen PAW-/Management-Host beschränkt |
 | Anmelderechte (GPO) | `Lokale Anmeldung verweigern` + `Anmeldung über RDP verweigern` (niemals interaktiv); ausschließlich `Anmelden als Batchauftrag` auf dieser PAW. Netzwerkanmeldung **nicht** pauschal verweigern — siehe Hinweis unten |
 | Host | Läuft auf einem gehärteten Tier-0-Management-Server / PAW — niemals dem Collector |
-| Auditing | 4728/4729-EA-Mitgliedschaftsänderungsalarme + Alarme bei Fehlschlag der Grant-/Revoke-Aufgabe |
+| Auditing | 4756/4757-EA-Mitgliedschaftsänderungsalarme (universelle Gruppe) + Alarme bei Fehlschlag der Grant-/Revoke-Aufgabe |
 
 > **Zwei verschiedene gMSAs — verwechseln Sie ihren Netzwerkanmeldungsbedarf nicht.** *„Zugriff auf diesen Computer über das Netzwerk verweigern"* darf auf keines der beiden Konten pauschal angewendet werden, da beide auf Netzwerkanmeldung angewiesen sind:
 >
