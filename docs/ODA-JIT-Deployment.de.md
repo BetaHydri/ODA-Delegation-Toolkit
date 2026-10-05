@@ -1,4 +1,5 @@
 # ODA-JIT – Bereitstellung auf dem Tier-0-Host
+<!-- docx-meta: Dokument=ODA-JIT-Deployment (FullEA); Version / Status=1.0; Datum=05.10.2026 -->
 
 **🌐 Sprache:** [English](ODA-JIT-Deployment.md) · Deutsch
 
@@ -37,6 +38,7 @@ flowchart TD
     R & G & W -. importieren .-> M["ODAJit.Common.psm1"]
     R & G & W -. lesen .-> C["ODAJit.FOREST.psd1<br/>(aus ODAJit.example.psd1)"]
 ```
+<!-- docx-alt: Aufrufkette: | Register-ODAJitTasks.ps1 legt einmalig die Aufgaben ODA-JIT-Grant-<Forest> und ODA-JIT-Revoke-<Forest> an. Die Grant-Aufgabe startet Start-ODAJitGrant.ps1, die Revoke-Aufgabe Start-ODAJitRevokeWatcher.ps1. Beide rufen Invoke-ODAJitDelegation.ps1 -Mode FullEA auf (-operation add bzw. delete). Alle drei Skripte importieren ODAJit.Common.psm1 und lesen ODAJit.<forest>.psd1 (erstellt aus ODAJit.example.psd1). -->
 
 **Zum Testen zusätzlich** (auf einem Admin- oder Test-System, nicht zwingend auf dem Tier-0-Host):
 
@@ -86,6 +88,7 @@ flowchart LR
     W -- "SMB 445: C$ lesen" --> F
     W -- "ADWS 9389: EA-Mitgliedschaft entfernen" --> R
 ```
+<!-- docx-alt: Datenflüsse vom Tier-0-Host: | Grant → Forest-Root-DC (ADWS TCP 9389: EA-Mitgliedschaft mit TTL) und → GCs im Standort des Collectors (ADWS TCP 9389: Sync-ADObject, Prüfung). Watcher → Collector-Server (WinRM TCP 5985: Status der Aufgaben ADAssessment/ADSecurityAssessment und von OMSAssessment.exe; SMB TCP 445: C:\Assessments\*Assessment\*.recommendations.*) und → Forest-Root-DC (ADWS TCP 9389: EA-Mitgliedschaft entfernen). -->
 
 | Komponente | Ort | Hinweis |
 | ---------- | --- | ------- |
@@ -344,6 +347,12 @@ Tier-0-Host, eigenem `svc-ODA-JIT$` und eigener `ODAJit.<forest>.psd1`.
 Technisch kann ein Host mehrere Konfigurationen haben (die Aufgabennamen enthalten den
 Forest-Namen). Das geht aber nur, wenn ein Konto in mehreren Forests Enterprise Admins ändern
 darf, und genau das widerspricht der Forest-Trennung. **Nicht empfohlen.**
+
+> **Variante mit Admin-Forest:** Mit einem eigenen, gehärteten Admin-Forest und einem PIM-Trust kann
+> der Ausführer im Admin-Forest leben. Er erhält Enterprise-Admin-Rechte in Produktion dann über einen
+> Shadow Principal, ohne dauerhafte Mitgliedschaft in einer Produktionsgruppe. Grundlagen, Einrichtung
+> und Grenzen beschreibt [PAM-Trust-Shadow-Principals.de.md](PAM-Trust-Shadow-Principals.de.md).
+> Das ODA-gMSA bleibt im Produktions-Forest.
 
 ## 5. Betrieb
 

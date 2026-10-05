@@ -341,6 +341,12 @@ Technically one host can hold several configurations (the task names contain the
 but that requires one account that may modify Enterprise Admins in several forests – which
 contradicts the forest separation. **Not recommended.**
 
+> **Variant with an admin forest:** with a dedicated, hardened admin forest and a PIM trust the
+> executor can live in the admin forest and get Enterprise Admin rights in production via a shadow
+> principal – with no standing membership in a production group. Fundamentals, setup and limits are
+> in [PAM-Trust-Shadow-Principals.md](PAM-Trust-Shadow-Principals.md). The ODA gMSA stays in the
+> production forest.
+
 ## 5. Operations
 
 | Task | Procedure |
