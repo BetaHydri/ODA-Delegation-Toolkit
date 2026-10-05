@@ -6,3 +6,17 @@ ODA-Samples/
 
 # Microsoft ODA setup guide PDF (copyrighted reference, not for redistribution)
 oda-setup-guide.pdf
+
+# Customer documents and third-party reference material - NEVER commit (public repository)
+*.pdf
+*.log
+*.xlsx
+*.xls
+*.csv
+*.zip
+*.msg
+*.eml
+*.pst
+*.evtx
+*.etl
+SironaLog*
