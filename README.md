@@ -21,7 +21,7 @@ These scripts are essential for **ODA Active Directory Assessment least-privileg
 | `Set-SYSVOLWriteAccess.ps1` | Grant or revoke NTFS Modify on the SYSVOL domain root folder | Per domain |
 | `Process-DCs.ps1` | Orchestration script — loops through all DCs and applies WMI, SCM, and Netlogon permissions | All DCs |
 | `Invoke-ODAJitDelegation.ps1` | **JIT alternative** — grants/revokes only the Tier-0 / write-capable rights (Backup Operators, SYSVOL Write, Replicating Directory Changes) around the weekly assessment window | Forest (JIT) |
-| `Start-ODAJitGrant.ps1` / `Start-ODAJitRevokeWatcher.ps1` / `Register-ODAJitTasks.ps1` | **Automated FullEA JIT** — scheduled EA grant before the window, watcher that revokes after the ODA run ended + grace period, hard deadline (config per forest: `ODA-JIT.example.psd1`) | Forest (JIT) |
+| `Start-ODAJitGrant.ps1` / `Start-ODAJitRevokeWatcher.ps1` / `Register-ODAJitTasks.ps1` | **Automated FullEA JIT** — scheduled EA grant before the window, watcher that revokes after the ODA run ended + grace period, hard deadline (config per forest: `ODAJit.example.psd1`) | Forest (JIT) |
 
 ## Why Multiple Scripts?
 
@@ -516,9 +516,17 @@ Ready-to-run automation of `-Mode FullEA` for the **ODA AD and AD Security** ass
 assessment gMSA, one forest). The concept (German) with the end-of-collection analysis is in
 [docs/ODA-JIT-EnterpriseAdmin-Konzept.docx](docs/ODA-JIT-EnterpriseAdmin-Konzept.docx).
 
+> **Deploying it?** Which of the repository files FullEA needs, where they go on the Tier-0 host
+> and how to set it up per forest (executor gMSA, rights, ports, configuration, trial run) is
+> described step by step in [docs/ODA-JIT-Deployment.md](docs/ODA-JIT-Deployment.md)
+> ([Deutsch](docs/ODA-JIT-Deployment.de.md), Word: [ODA-JIT-Deployment.de.docx](docs/ODA-JIT-Deployment.de.docx)).
+> FullEA needs exactly six files: `Register-ODAJitTasks.ps1`, `Start-ODAJitGrant.ps1`,
+> `Start-ODAJitRevokeWatcher.ps1`, `Invoke-ODAJitDelegation.ps1`, `ODAJit.Common.psm1`,
+> `ODAJit.example.psd1`.
+
 | File | Purpose |
 | ---- | ------- |
-| `ODA-JIT.example.psd1` | Config template — **one file per forest** (root DC, group DN, site GCs, collector, working directory, window, grace, deadline, TTL) |
+| `ODAJit.example.psd1` | Config template — **one file per forest** (root DC, group DN, site GCs, collector, working directory, window, grace, deadline, TTL) |
 | `Register-ODAJitTasks.ps1` | Registers `\ODA-JIT\ODA-JIT-Grant-<Forest>` and `ODA-JIT-Revoke-<Forest>` on the Tier-0 host as the executor gMSA (day roll-over, event source, checks the ODA task schedule on the collector) |
 | `Start-ODAJitGrant.ps1` | `T − 60 min`: EA grant with PAM TTL, `Sync-ADObject` to the collector-site GCs, verification via GC port 3268; `-StartOdaTasks` for manual runs |
 | `Start-ODAJitRevokeWatcher.ps1` | `T + 15 min`: polls the collector, waits for the run to end + grace period, revokes and verifies; no-start timeout, hard deadline, `-RevokeNow`, `-WhatIf` dry run |
@@ -550,18 +558,18 @@ sequenceDiagram
 
 ```powershell
 # Once per forest on the Tier-0 host (elevated)
-Copy-Item .\ODA-JIT.example.psd1 C:\ODA-JIT\ODA-JIT.contoso.psd1    # edit
-.\Register-ODAJitTasks.ps1 -ConfigPath C:\ODA-JIT\ODA-JIT.contoso.psd1
+Copy-Item .\ODAJit.example.psd1 C:\ODA-JIT\ODAJit.contoso.psd1    # edit
+.\Register-ODAJitTasks.ps1 -ConfigPath C:\ODA-JIT\ODAJit.contoso.psd1
 
 # Dry run of the watcher (detection only, no revoke)
-.\Start-ODAJitRevokeWatcher.ps1 -ConfigPath C:\ODA-JIT\ODA-JIT.contoso.psd1 -WhatIf
+.\Start-ODAJitRevokeWatcher.ps1 -ConfigPath C:\ODA-JIT\ODAJit.contoso.psd1 -WhatIf
 
 # Manual run outside the weekly window
-.\Start-ODAJitGrant.ps1 -ConfigPath C:\ODA-JIT\ODA-JIT.contoso.psd1 -StartOdaTasks
-.\Start-ODAJitRevokeWatcher.ps1 -ConfigPath C:\ODA-JIT\ODA-JIT.contoso.psd1 -WindowStart (Get-Date)
+.\Start-ODAJitGrant.ps1 -ConfigPath C:\ODA-JIT\ODAJit.contoso.psd1 -StartOdaTasks
+.\Start-ODAJitRevokeWatcher.ps1 -ConfigPath C:\ODA-JIT\ODAJit.contoso.psd1 -WindowStart (Get-Date)
 
 # Emergency revoke
-.\Start-ODAJitRevokeWatcher.ps1 -ConfigPath C:\ODA-JIT\ODA-JIT.contoso.psd1 -RevokeNow
+.\Start-ODAJitRevokeWatcher.ps1 -ConfigPath C:\ODA-JIT\ODAJit.contoso.psd1 -RevokeNow
 
 # Unit tests (Pester 5)
 Invoke-Pester .\Tests

@@ -56,7 +56,7 @@ Describe 'Test-ODAJitConfig' {
         { New-TestConfig @{ WorkingDirectory = '\\srv\share' } } | Should -Throw '*WorkingDirectory*'
     }
     It 'loads the shipped example config' {
-        { Import-ODAJitConfig -Path (Join-Path $PSScriptRoot '..\ODA-JIT.example.psd1') } | Should -Not -Throw
+        { Import-ODAJitConfig -Path (Join-Path $PSScriptRoot '..\ODAJit.example.psd1') } | Should -Not -Throw
     }
 }
 

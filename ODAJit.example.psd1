@@ -1,5 +1,5 @@
 @{
-    # ODA-JIT configuration - ONE file per AD forest (e.g. ODA-JIT.contoso.psd1).
+    # ODA-JIT configuration - ONE file per AD forest (e.g. ODAJit.contoso.psd1).
     # Used by Start-ODAJitGrant.ps1, Start-ODAJitRevokeWatcher.ps1 and Register-ODAJitTasks.ps1.
 
     # --- Forest / accounts -------------------------------------------------------------

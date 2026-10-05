@@ -21,7 +21,7 @@ Diese Skripte sind essenziell für die **Least-Privilege-Delegation des ODA Acti
 | `Set-SYSVOLWriteAccess.ps1` | NTFS-Änderungsrecht (Modify) auf dem SYSVOL-Domänenstammordner gewähren oder entziehen | Pro Domäne |
 | `Process-DCs.ps1` | Orchestrierungsskript — durchläuft alle DCs und wendet WMI-, SCM- und Netlogon-Berechtigungen an | Alle DCs |
 | `Invoke-ODAJitDelegation.ps1` | **JIT-Alternative** — gewährt/entzieht nur die Tier-0-/schreibfähigen Rechte (Backup Operators, SYSVOL-Schreibrecht, Replizierung von Verzeichnisänderungen) rund um das wöchentliche Assessment-Fenster | Gesamtstruktur (JIT) |
-| `Start-ODAJitGrant.ps1` / `Start-ODAJitRevokeWatcher.ps1` / `Register-ODAJitTasks.ps1` | **Automatisiertes FullEA-JIT** — EA-Vergabe per Zeitplan vor dem Fenster, Watcher entzieht nach Ende des ODA-Laufs + Karenzzeit, harte Deadline (Konfiguration je Forest: `ODA-JIT.example.psd1`) | Gesamtstruktur (JIT) |
+| `Start-ODAJitGrant.ps1` / `Start-ODAJitRevokeWatcher.ps1` / `Register-ODAJitTasks.ps1` | **Automatisiertes FullEA-JIT** — EA-Vergabe per Zeitplan vor dem Fenster, Watcher entzieht nach Ende des ODA-Laufs + Karenzzeit, harte Deadline (Konfiguration je Forest: `ODAJit.example.psd1`) | Gesamtstruktur (JIT) |
 
 ## Warum mehrere Skripte?
 
@@ -451,9 +451,11 @@ Verwenden Sie ein dediziertes, nicht-interaktives **Tier-0-Automatisierungs-gMSA
 
 Einsatzbereite Automatisierung von `-Mode FullEA` für die Assessments **ODA AD und AD Security** (ein Assessment-gMSA, eine Gesamtstruktur). Das Konzept mit der Analyse der Ende-Signale steht in [docs/ODA-JIT-EnterpriseAdmin-Konzept.docx](docs/ODA-JIT-EnterpriseAdmin-Konzept.docx).
 
+> **Bereitstellung:** Welche Dateien des Repositorys FullEA braucht, wohin sie auf dem Tier-0-Host kommen und wie die Einrichtung je Gesamtstruktur abläuft (Ausführer-gMSA, Rechte, Ports, Konfiguration, Probelauf), beschreibt Schritt für Schritt [docs/ODA-JIT-Deployment.de.md](docs/ODA-JIT-Deployment.de.md) ([English](docs/ODA-JIT-Deployment.md), Word: [ODA-JIT-Deployment.de.docx](docs/ODA-JIT-Deployment.de.docx)). FullEA braucht genau sechs Dateien: `Register-ODAJitTasks.ps1`, `Start-ODAJitGrant.ps1`, `Start-ODAJitRevokeWatcher.ps1`, `Invoke-ODAJitDelegation.ps1`, `ODAJit.Common.psm1`, `ODAJit.example.psd1`.
+
 | Datei | Zweck |
 | ----- | ----- |
-| `ODA-JIT.example.psd1` | Konfigurationsvorlage — **eine Datei je Gesamtstruktur** (Root-DC, Gruppen-DN, Standort-GCs, Collector, Arbeitsverzeichnis, Fenster, Karenzzeit, Deadline, TTL) |
+| `ODAJit.example.psd1` | Konfigurationsvorlage — **eine Datei je Gesamtstruktur** (Root-DC, Gruppen-DN, Standort-GCs, Collector, Arbeitsverzeichnis, Fenster, Karenzzeit, Deadline, TTL) |
 | `Register-ODAJitTasks.ps1` | Legt `\ODA-JIT\ODA-JIT-Grant-<Forest>` und `ODA-JIT-Revoke-<Forest>` auf dem Tier-0-Host unter dem Ausführer-gMSA an (Tageswechsel, Ereignisquelle, Abgleich mit dem Zeitplan der ODA-Aufgaben auf dem Collector) |
 | `Start-ODAJitGrant.ps1` | `T − 60 min`: EA-Vergabe mit PAM-TTL, `Sync-ADObject` auf die GCs im Standort des Collectors, Prüfung über GC-Port 3268; `-StartOdaTasks` für manuelle Läufe |
 | `Start-ODAJitRevokeWatcher.ps1` | `T + 15 min`: fragt den Collector ab, wartet auf das Ende des Laufs + Karenzzeit, entzieht und prüft; No-Start-Timeout, harte Deadline, `-RevokeNow`, `-WhatIf`-Trockenlauf |
@@ -483,18 +485,18 @@ sequenceDiagram
 
 ```powershell
 # Einmalig je Gesamtstruktur auf dem Tier-0-Host (als Administrator)
-Copy-Item .\ODA-JIT.example.psd1 C:\ODA-JIT\ODA-JIT.contoso.psd1    # anpassen
-.\Register-ODAJitTasks.ps1 -ConfigPath C:\ODA-JIT\ODA-JIT.contoso.psd1
+Copy-Item .\ODAJit.example.psd1 C:\ODA-JIT\ODAJit.contoso.psd1    # anpassen
+.\Register-ODAJitTasks.ps1 -ConfigPath C:\ODA-JIT\ODAJit.contoso.psd1
 
 # Trockenlauf des Watchers (nur Erkennung, kein Revoke)
-.\Start-ODAJitRevokeWatcher.ps1 -ConfigPath C:\ODA-JIT\ODA-JIT.contoso.psd1 -WhatIf
+.\Start-ODAJitRevokeWatcher.ps1 -ConfigPath C:\ODA-JIT\ODAJit.contoso.psd1 -WhatIf
 
 # Manueller Lauf außerhalb des Wochenfensters
-.\Start-ODAJitGrant.ps1 -ConfigPath C:\ODA-JIT\ODA-JIT.contoso.psd1 -StartOdaTasks
-.\Start-ODAJitRevokeWatcher.ps1 -ConfigPath C:\ODA-JIT\ODA-JIT.contoso.psd1 -WindowStart (Get-Date)
+.\Start-ODAJitGrant.ps1 -ConfigPath C:\ODA-JIT\ODAJit.contoso.psd1 -StartOdaTasks
+.\Start-ODAJitRevokeWatcher.ps1 -ConfigPath C:\ODA-JIT\ODAJit.contoso.psd1 -WindowStart (Get-Date)
 
 # Notfall: sofort entziehen
-.\Start-ODAJitRevokeWatcher.ps1 -ConfigPath C:\ODA-JIT\ODA-JIT.contoso.psd1 -RevokeNow
+.\Start-ODAJitRevokeWatcher.ps1 -ConfigPath C:\ODA-JIT\ODAJit.contoso.psd1 -RevokeNow
 
 # Unit-Tests (Pester 5)
 Invoke-Pester .\Tests

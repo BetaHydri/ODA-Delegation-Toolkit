@@ -20,7 +20,7 @@
     'Log on as a batch job'.
 
 .PARAMETER ConfigPath
-    Path to the per-forest configuration file (see ODA-JIT.example.psd1). Use an absolute path;
+    Path to the per-forest configuration file (see ODAJit.example.psd1). Use an absolute path;
     it is embedded in the task actions.
 
 .PARAMETER ScriptDirectory
@@ -37,10 +37,10 @@
     Remove the two tasks for this forest instead of creating them.
 
 .EXAMPLE
-    .\Register-ODAJitTasks.ps1 -ConfigPath C:\ODA-JIT\ODA-JIT.contoso.psd1
+    .\Register-ODAJitTasks.ps1 -ConfigPath C:\ODA-JIT\ODAJit.contoso.psd1
 
 .EXAMPLE
-    .\Register-ODAJitTasks.ps1 -ConfigPath C:\ODA-JIT\ODA-JIT.contoso.psd1 -Unregister
+    .\Register-ODAJitTasks.ps1 -ConfigPath C:\ODA-JIT\ODAJit.contoso.psd1 -Unregister
 
 .AUTHOR
     Jan Tiedemann

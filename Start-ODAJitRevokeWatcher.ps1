@@ -32,7 +32,7 @@
       1013 revoke FAILED                                 Error
 
 .PARAMETER ConfigPath
-    Path to the per-forest configuration file (see ODA-JIT.example.psd1).
+    Path to the per-forest configuration file (see ODAJit.example.psd1).
 
 .PARAMETER WindowStart
     Overrides the computed window start (use for manual runs, e.g. -WindowStart (Get-Date)).
@@ -41,10 +41,10 @@
     Skip watching and revoke immediately (emergency / cleanup).
 
 .EXAMPLE
-    .\Start-ODAJitRevokeWatcher.ps1 -ConfigPath C:\ODA-JIT\ODA-JIT.contoso.psd1
+    .\Start-ODAJitRevokeWatcher.ps1 -ConfigPath C:\ODA-JIT\ODAJit.contoso.psd1
 
 .EXAMPLE
-    .\Start-ODAJitRevokeWatcher.ps1 -ConfigPath C:\ODA-JIT\ODA-JIT.contoso.psd1 -RevokeNow
+    .\Start-ODAJitRevokeWatcher.ps1 -ConfigPath C:\ODA-JIT\ODAJit.contoso.psd1 -RevokeNow
 
 .NOTES
     Requires the ActiveDirectory and ScheduledTasks modules, CIM access and read access to the

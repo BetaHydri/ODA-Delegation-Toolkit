@@ -9,7 +9,7 @@
     Register-ODAJitTasks.ps1 at <WindowStart - GrantLeadMinutes> (default T-60 min).
 
     Steps:
-      1. Load and validate the per-forest config (ODA-JIT.<forest>.psd1).
+      1. Load and validate the per-forest config (ODAJit.<forest>.psd1).
       2. Pre-check the collector: warn if an ODA task is already running (a running process
          keeps its old Kerberos token - the grant only affects the NEXT logon).
       3. Invoke-ODAJitDelegation.ps1 -operation add -Mode FullEA (EA resolved by SID, PAM TTL).
@@ -26,18 +26,18 @@
     Application event log (source ODA-JIT): 1000 grant OK, 1001 grant failed / not replicated.
 
 .PARAMETER ConfigPath
-    Path to the per-forest configuration file (see ODA-JIT.example.psd1).
+    Path to the per-forest configuration file (see ODAJit.example.psd1).
 
 .PARAMETER StartOdaTasks
     After a verified grant, start the configured ODA tasks on the collector right away.
 
 .EXAMPLE
-    .\Start-ODAJitGrant.ps1 -ConfigPath C:\ODA-JIT\ODA-JIT.contoso.psd1
+    .\Start-ODAJitGrant.ps1 -ConfigPath C:\ODA-JIT\ODAJit.contoso.psd1
 
 .EXAMPLE
     # Manual run outside the weekly window
-    .\Start-ODAJitGrant.ps1 -ConfigPath C:\ODA-JIT\ODA-JIT.contoso.psd1 -StartOdaTasks
-    .\Start-ODAJitRevokeWatcher.ps1 -ConfigPath C:\ODA-JIT\ODA-JIT.contoso.psd1 -WindowStart (Get-Date)
+    .\Start-ODAJitGrant.ps1 -ConfigPath C:\ODA-JIT\ODAJit.contoso.psd1 -StartOdaTasks
+    .\Start-ODAJitRevokeWatcher.ps1 -ConfigPath C:\ODA-JIT\ODAJit.contoso.psd1 -WindowStart (Get-Date)
 
 .NOTES
     Requires the ActiveDirectory and ScheduledTasks modules and a Tier-0 executor identity.
