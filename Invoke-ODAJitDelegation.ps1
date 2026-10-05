@@ -186,38 +186,78 @@ Write-Log "=== Starting Invoke-ODAJitDelegation | Mode: $Mode | Operation: $oper
 
 Import-Module ActiveDirectory -ErrorAction Stop
 
-# Add/remove a group membership on a single target server (a DC that owns the group).
-# Uses -Server to avoid cross-domain referral errors; PAM -MemberTimeToLive on add.
-function Set-JitGroupMembership {
-    param ([string]$op, [string]$groupName, [string]$memberDN, [string]$server, [int]$ttl, [bool]$pam)
+$script:failureCount = 0
 
-    if ($op -eq 'add') {
-        try {
+# Well-known SIDs keep the group lookup locale-independent (e.g. 'Organisations-Admins' /
+# 'Sicherungs-Operatoren' in German forests).
+$backupOperatorsSid = 'S-1-5-32-551'
+
+function Get-DomainFromDN ([string]$dn) {
+    (@([regex]::Matches($dn, '(?i)(?:^|,)DC=([^,]+)') | ForEach-Object { $_.Groups[1].Value })) -join '.'
+}
+
+# Returns $null if absent, 0 for a standing membership, else the remaining PAM TTL in seconds.
+# -ShowMemberTimeToLive is only requested with PAM: the LDAP control needs FFL 2016+ DCs.
+function Get-MemberTtl ([string]$groupIdentity, [string]$server, [string]$memberDN) {
+    $query = @{ Identity = $groupIdentity; Server = $server; Properties = 'member'; ErrorAction = 'Stop' }
+    if ($usePamTtl) { $query.ShowMemberTimeToLive = $true }
+    $values = @((Get-ADGroup @query).member)
+    foreach ($v in $values) {
+        if ($v -match '^<TTL=(\d+)>,(.+)$') { if ($Matches[2] -eq $memberDN) { return [int]$Matches[1] } }
+        elseif ($v -eq $memberDN) { return 0 }
+    }
+    $null
+}
+
+# Add/remove a group membership on a single target server (a DC that owns the group).
+# The member object is resolved in its OWN domain and passed as an object, so cross-domain
+# adds (child-domain group -> forest-root group) do not fail with referral/identity errors.
+# Every change is verified by reading the membership back; failures set the exit code.
+function Set-JitGroupMembership {
+    param ([string]$op, [string]$groupIdentity, [string]$groupLabel, [string]$memberDN,
+        [string]$server, [int]$ttl, [bool]$pam)
+
+    try {
+        $before = Get-MemberTtl -groupIdentity $groupIdentity -server $server -memberDN $memberDN
+
+        if ($op -eq 'add') {
+            if ($null -ne $before -and ($before -eq 0 -or -not $pam)) {
+                $kind = if ($before -eq 0) { 'standing (no TTL)' } else { "TTL ${before}s" }
+                Write-Log "  $groupLabel [$server] - already a member ($kind); nothing to do" 'WARN'
+                return
+            }
+            $memberObj = Get-ADObject -Identity $memberDN -Server (Get-DomainFromDN $memberDN) -ErrorAction Stop
             if ($pam) {
-                $span = New-TimeSpan -Hours $ttl
-                Add-ADGroupMember -Identity $groupName -Members $memberDN `
-                    -Server $server -MemberTimeToLive $span -ErrorAction Stop
-                Write-Log "  $groupName [$server] - added with TTL ${ttl}h" 'OK'
+                # An existing TTL link cannot be extended in place - remove and re-add with the full TTL
+                if ($null -ne $before) {
+                    Remove-ADGroupMember -Identity $groupIdentity -Members $memberObj -Server $server -Confirm:$false -ErrorAction Stop
+                }
+                Add-ADGroupMember -Identity $groupIdentity -Members $memberObj -Server $server `
+                    -MemberTimeToLive (New-TimeSpan -Hours $ttl) -ErrorAction Stop
             }
             else {
-                Add-ADGroupMember -Identity $groupName -Members $memberDN `
-                    -Server $server -ErrorAction Stop
-                Write-Log "  $groupName [$server] - added (no TTL; rely on revoke)" 'WARN'
+                Add-ADGroupMember -Identity $groupIdentity -Members $memberObj -Server $server -ErrorAction Stop
             }
+            $after = Get-MemberTtl -groupIdentity $groupIdentity -server $server -memberDN $memberDN
+            if ($null -eq $after) { throw 'membership not found after add' }
+            if ($pam) { Write-Log "  $groupLabel [$server] - added with TTL ${ttl}h (remaining ${after}s)" 'OK' }
+            else { Write-Log "  $groupLabel [$server] - added (no TTL; rely on revoke)" 'WARN' }
         }
-        catch {
-            Write-Log "  $groupName [$server] - FAILED: $($_.Exception.Message)" 'ERR'
+        else {
+            if ($null -eq $before) {
+                Write-Log "  $groupLabel [$server] - not a member; nothing to remove" 'OK'
+                return
+            }
+            $memberObj = Get-ADObject -Identity $memberDN -Server (Get-DomainFromDN $memberDN) -ErrorAction Stop
+            Remove-ADGroupMember -Identity $groupIdentity -Members $memberObj -Server $server -Confirm:$false -ErrorAction Stop
+            $after = Get-MemberTtl -groupIdentity $groupIdentity -server $server -memberDN $memberDN
+            if ($null -ne $after) { throw 'membership still present after remove' }
+            Write-Log "  $groupLabel [$server] - removed (verified)" 'OK'
         }
     }
-    else {
-        try {
-            Remove-ADGroupMember -Identity $groupName -Members $memberDN `
-                -Server $server -Confirm:$false -ErrorAction Stop
-            Write-Log "  $groupName [$server] - removed" 'OK'
-        }
-        catch {
-            Write-Log "  $groupName [$server] - not removed (may already be absent): $($_.Exception.Message)" 'WARN'
-        }
+    catch {
+        $script:failureCount++
+        Write-Log "  $groupLabel [$server] - $op FAILED: $($_.Exception.Message)" 'ERR'
     }
 }
 
@@ -226,7 +266,7 @@ function Set-BackupOperatorsMembership {
     param ([string]$op, [string]$memberDN, [string[]]$domains, [int]$ttl, [bool]$pam)
 
     foreach ($domain in $domains) {
-        Set-JitGroupMembership -op $op -groupName 'Backup Operators' `
+        Set-JitGroupMembership -op $op -groupIdentity $backupOperatorsSid -groupLabel 'Backup Operators' `
             -memberDN $memberDN -server $domain -ttl $ttl -pam $pam
     }
 }
@@ -241,8 +281,16 @@ if ($Mode -eq 'FullEA') {
     else {
         Write-Log "--- JIT revoke (FullEA): Enterprise Admins membership ---"
     }
-    Set-JitGroupMembership -op $operation -groupName 'Enterprise Admins' `
-        -memberDN $groupDN -server $forestRootServer -ttl $ttlHours -pam $usePamTtl
+    try {
+        $rootDomain = (Get-ADForest -Server $forestRootServer -ErrorAction Stop).RootDomain
+        $eaSid = '{0}-519' -f (Get-ADDomain -Identity $rootDomain -Server $forestRootServer -ErrorAction Stop).DomainSID.Value
+        Set-JitGroupMembership -op $operation -groupIdentity $eaSid -groupLabel 'Enterprise Admins' `
+            -memberDN $groupDN -server $forestRootServer -ttl $ttlHours -pam $usePamTtl
+    }
+    catch {
+        $script:failureCount++
+        Write-Log "  Enterprise Admins - cannot resolve forest root / EA SID via $forestRootServer : $($_.Exception.Message)" 'ERR'
+    }
 }
 elseif ($operation -eq 'add') {
     # Grant order: ACLs first, then the token-sensitive membership last
@@ -291,4 +339,9 @@ else {
     catch { Write-Log "  Replicating Directory Changes - FAILED: $($_.Exception.Message)" 'ERR' }
 }
 
+if ($script:failureCount -gt 0) {
+    Write-Log "=== Invoke-ODAJitDelegation completed WITH $($script:failureCount) ERROR(S) | Operation: $operation ===" 'ERR'
+    exit 1
+}
 Write-Log "=== Invoke-ODAJitDelegation completed | Operation: $operation ==="
+exit 0

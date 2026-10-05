@@ -21,6 +21,7 @@ These scripts are essential for **ODA Active Directory Assessment least-privileg
 | `Set-SYSVOLWriteAccess.ps1` | Grant or revoke NTFS Modify on the SYSVOL domain root folder | Per domain |
 | `Process-DCs.ps1` | Orchestration script — loops through all DCs and applies WMI, SCM, and Netlogon permissions | All DCs |
 | `Invoke-ODAJitDelegation.ps1` | **JIT alternative** — grants/revokes only the Tier-0 / write-capable rights (Backup Operators, SYSVOL Write, Replicating Directory Changes) around the weekly assessment window | Forest (JIT) |
+| `Start-ODAJitGrant.ps1` / `Start-ODAJitRevokeWatcher.ps1` / `Register-ODAJitTasks.ps1` | **Automated FullEA JIT** — scheduled EA grant before the window, watcher that revokes after the ODA run ended + grace period, hard deadline (config per forest: `ODA-JIT.example.psd1`) | Forest (JIT) |
 
 ## Why Multiple Scripts?
 
@@ -509,6 +510,85 @@ the executor: keep the single automation gMSA and prefer `-Mode Granular` to shr
 assessment gMSA's weekly blast radius. Whatever automates EA membership is unavoidably a
 standing Tier-0 principal — the best you can do is make it one locked-down gMSA on a PAW.
 
+## ODA-JIT automation (FullEA): grant, revoke watcher, scheduled tasks
+
+Ready-to-run automation of `-Mode FullEA` for the **ODA AD and AD Security** assessments (one
+assessment gMSA, one forest). The concept (German) with the end-of-collection analysis is in
+[docs/ODA-JIT-EnterpriseAdmin-Konzept.docx](docs/ODA-JIT-EnterpriseAdmin-Konzept.docx).
+
+| File | Purpose |
+| ---- | ------- |
+| `ODA-JIT.example.psd1` | Config template — **one file per forest** (root DC, group DN, site GCs, collector, working directory, window, grace, deadline, TTL) |
+| `Register-ODAJitTasks.ps1` | Registers `\ODA-JIT\ODA-JIT-Grant-<Forest>` and `ODA-JIT-Revoke-<Forest>` on the Tier-0 host as the executor gMSA (day roll-over, event source, checks the ODA task schedule on the collector) |
+| `Start-ODAJitGrant.ps1` | `T − 60 min`: EA grant with PAM TTL, `Sync-ADObject` to the collector-site GCs, verification via GC port 3268; `-StartOdaTasks` for manual runs |
+| `Start-ODAJitRevokeWatcher.ps1` | `T + 15 min`: polls the collector, waits for the run to end + grace period, revokes and verifies; no-start timeout, hard deadline, `-RevokeNow`, `-WhatIf` dry run |
+| `ODAJit.Common.psm1`, `Tests\ODAJit.Common.Tests.ps1` | Shared logic and Pester tests |
+
+**End-of-collection signals** (all must hold for every configured ODA task):
+
+- **T1** — the task ran in the window (`LastRunTime ≥ window start`) and is not `Running`/`Queued`
+- **T3** — no `OMSAssessment.exe` process on the collector
+- **T4** — a `*.recommendations.*` file (`new.*`, or `processed.*` after upload) was written in
+  the window in each `<WorkingDirectory>\<XX>Assessment` folder → the run counts as *successful*
+
+`LastTaskResult = 0` does **not** prove that all collectors succeeded. Upload (`new.*` →
+`processed.*`) needs no EA, so the watcher does not wait for it.
+
+```mermaid
+sequenceDiagram
+    participant PAW as Tier-0 host (svc-ODA-JIT$)
+    participant AD as Forest root DC / site GCs
+    participant COL as Collector (ODA gMSA)
+    PAW->>AD: T-60 Grant EA (PAM TTL) + Sync-ADObject + verify on GC
+    COL->>COL: T+0 ADAssessment / ADSecurityAssessment start (new TGT incl. EA)
+    loop every PollMinutes
+        PAW->>COL: CIM - task state, OMSAssessment.exe
+    end
+    PAW->>COL: run ended - grace period - re-check, read *.recommendations.*
+    PAW->>AD: Revoke EA + verify (deadline / PAM TTL as backstop)
+```
+
+```powershell
+# Once per forest on the Tier-0 host (elevated)
+Copy-Item .\ODA-JIT.example.psd1 C:\ODA-JIT\ODA-JIT.contoso.psd1    # edit
+.\Register-ODAJitTasks.ps1 -ConfigPath C:\ODA-JIT\ODA-JIT.contoso.psd1
+
+# Dry run of the watcher (detection only, no revoke)
+.\Start-ODAJitRevokeWatcher.ps1 -ConfigPath C:\ODA-JIT\ODA-JIT.contoso.psd1 -WhatIf
+
+# Manual run outside the weekly window
+.\Start-ODAJitGrant.ps1 -ConfigPath C:\ODA-JIT\ODA-JIT.contoso.psd1 -StartOdaTasks
+.\Start-ODAJitRevokeWatcher.ps1 -ConfigPath C:\ODA-JIT\ODA-JIT.contoso.psd1 -WindowStart (Get-Date)
+
+# Emergency revoke
+.\Start-ODAJitRevokeWatcher.ps1 -ConfigPath C:\ODA-JIT\ODA-JIT.contoso.psd1 -RevokeNow
+
+# Unit tests (Pester 5)
+Invoke-Pester .\Tests
+```
+
+| Application event (source `ODA-JIT`) | Meaning |
+| ------------------------------------ | ------- |
+| 1000 / 1001 | Grant OK / grant failed or not visible on the site GCs |
+| 1010 | Revoked after a successful run |
+| 1011 | Revoked — run incomplete, without results, or manual |
+| 1012 | Revoked at the deadline |
+| 1013 | Revoke **failed** (PAM TTL remains the backstop) |
+
+**Why 60 min lead time instead of 15?** Enterprise Admins is a universal group in the forest
+root; the KDC of the gMSA's domain expands it through a Global Catalog. The grant is pushed with
+`Sync-ADObject` and verified on the collector-site GCs — the lead time is only a buffer for
+inter-site replication.
+
+**Multiple forests**: one config, one executor gMSA and one Tier-0 host **per forest** (never a
+central cross-forest executor). On the Azure side a single **Engage Center Connector** can hold
+multiple Log Analytics workspace connections
+([Manage Log Analytics workspaces](https://learn.microsoft.com/services-hub/microsoft-engage-center/health/manage-log-analytics));
+put each forest's collector (Arc) and LAW into its own resource group — the Engage Center only
+offers machines from the active LAW's subscription/resource group
+([Manage Assessments](https://learn.microsoft.com/services-hub/microsoft-engage-center/health/manage-assessments)).
+The LAW must keep public network access enabled.
+
 ## Prerequisites
 
 - Windows OS
@@ -516,6 +596,8 @@ standing Tier-0 principal — the best you can do is make it one locked-down gMS
 - **Administrator** privileges (required to modify WMI namespace security and SCM DACL)
 - For `Invoke-ODAJitDelegation.ps1`: the **ActiveDirectory** module (RSAT), a **Tier-0**
   executor identity, and (recommended) **PAM** enabled (Forest Functional Level 2016+)
+- For the ODA-JIT automation additionally: the **ScheduledTasks** module, CIM (WinRM) access and
+  read access to the collector's `C$` share from the Tier-0 host; Pester 5 for the tests
 
 ## License
 

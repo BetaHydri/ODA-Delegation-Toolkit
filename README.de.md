@@ -21,6 +21,7 @@ Diese Skripte sind essenziell für die **Least-Privilege-Delegation des ODA Acti
 | `Set-SYSVOLWriteAccess.ps1` | NTFS-Änderungsrecht (Modify) auf dem SYSVOL-Domänenstammordner gewähren oder entziehen | Pro Domäne |
 | `Process-DCs.ps1` | Orchestrierungsskript — durchläuft alle DCs und wendet WMI-, SCM- und Netlogon-Berechtigungen an | Alle DCs |
 | `Invoke-ODAJitDelegation.ps1` | **JIT-Alternative** — gewährt/entzieht nur die Tier-0-/schreibfähigen Rechte (Backup Operators, SYSVOL-Schreibrecht, Replizierung von Verzeichnisänderungen) rund um das wöchentliche Assessment-Fenster | Gesamtstruktur (JIT) |
+| `Start-ODAJitGrant.ps1` / `Start-ODAJitRevokeWatcher.ps1` / `Register-ODAJitTasks.ps1` | **Automatisiertes FullEA-JIT** — EA-Vergabe per Zeitplan vor dem Fenster, Watcher entzieht nach Ende des ODA-Laufs + Karenzzeit, harte Deadline (Konfiguration je Forest: `ODA-JIT.example.psd1`) | Gesamtstruktur (JIT) |
 
 ## Warum mehrere Skripte?
 
@@ -446,12 +447,78 @@ Verwenden Sie ein dediziertes, nicht-interaktives **Tier-0-Automatisierungs-gMSA
 
 **Minimierung von Tier-0-Konten.** Mit diesem Design fügen Sie genau **eine** neue *dauerhafte* Tier-0-Identität hinzu (das Automatisierungs-gMSA). Das Assessment-gMSA hält **null** dauerhafte Tier-0-Rechte — es wird nur für das ~1–2-stündige wöchentliche Fenster erhöht. Die Konto*anzahl* ist für `Granular` und `FullEA` gleich; der Unterschied ist die **Breite** der transienten Rechteerhöhung (eine begrenzte Teilmenge vs. volle Enterprise Admins). Der eigentliche Hebel für Least Privilege ist also die **Variantenwahl**, nicht der Ausführer: Behalten Sie das einzelne Automatisierungs-gMSA und bevorzugen Sie `-Mode Granular`, um den wöchentlichen Wirkungsradius des Assessment-gMSA zu verkleinern. Was auch immer die EA-Mitgliedschaft automatisiert, ist unvermeidlich ein dauerhaftes Tier-0-Prinzipal — das Beste, was Sie tun können, ist, es zu einem abgeschotteten gMSA auf einem PAW zu machen.
 
+## ODA-JIT-Automatisierung (FullEA): Grant, Revoke-Watcher, geplante Aufgaben
+
+Einsatzbereite Automatisierung von `-Mode FullEA` für die Assessments **ODA AD und AD Security** (ein Assessment-gMSA, eine Gesamtstruktur). Das Konzept mit der Analyse der Ende-Signale steht in [docs/ODA-JIT-EnterpriseAdmin-Konzept.docx](docs/ODA-JIT-EnterpriseAdmin-Konzept.docx).
+
+| Datei | Zweck |
+| ----- | ----- |
+| `ODA-JIT.example.psd1` | Konfigurationsvorlage — **eine Datei je Gesamtstruktur** (Root-DC, Gruppen-DN, Standort-GCs, Collector, Arbeitsverzeichnis, Fenster, Karenzzeit, Deadline, TTL) |
+| `Register-ODAJitTasks.ps1` | Legt `\ODA-JIT\ODA-JIT-Grant-<Forest>` und `ODA-JIT-Revoke-<Forest>` auf dem Tier-0-Host unter dem Ausführer-gMSA an (Tageswechsel, Ereignisquelle, Abgleich mit dem Zeitplan der ODA-Aufgaben auf dem Collector) |
+| `Start-ODAJitGrant.ps1` | `T − 60 min`: EA-Vergabe mit PAM-TTL, `Sync-ADObject` auf die GCs im Standort des Collectors, Prüfung über GC-Port 3268; `-StartOdaTasks` für manuelle Läufe |
+| `Start-ODAJitRevokeWatcher.ps1` | `T + 15 min`: fragt den Collector ab, wartet auf das Ende des Laufs + Karenzzeit, entzieht und prüft; No-Start-Timeout, harte Deadline, `-RevokeNow`, `-WhatIf`-Trockenlauf |
+| `ODAJit.Common.psm1`, `Tests\ODAJit.Common.Tests.ps1` | Gemeinsame Logik und Pester-Tests |
+
+**Ende-Signale** (müssen für jede konfigurierte ODA-Aufgabe erfüllt sein):
+
+- **T1** — die Aufgabe lief im Fenster (`LastRunTime ≥ Fensterstart`) und ist nicht `Running`/`Queued`
+- **T3** — kein `OMSAssessment.exe`-Prozess auf dem Collector
+- **T4** — eine Datei `*.recommendations.*` (`new.*` bzw. nach dem Upload `processed.*`) wurde im Fenster in jedem Ordner `<WorkingDirectory>\<XX>Assessment` geschrieben → der Lauf gilt als *erfolgreich*
+
+`LastTaskResult = 0` beweist **nicht**, dass alle Collectors erfolgreich waren. Der Upload (`new.*` → `processed.*`) braucht kein EA, darauf wartet der Watcher nicht.
+
+```mermaid
+sequenceDiagram
+    participant PAW as Tier-0-Host (svc-ODA-JIT$)
+    participant AD as Forest-Root-DC / Standort-GCs
+    participant COL as Collector (ODA-gMSA)
+    PAW->>AD: T-60 EA-Grant (PAM-TTL) + Sync-ADObject + Pruefung am GC
+    COL->>COL: T+0 Start ADAssessment / ADSecurityAssessment (neues TGT inkl. EA)
+    loop alle PollMinutes
+        PAW->>COL: CIM - Aufgabenstatus, OMSAssessment.exe
+    end
+    PAW->>COL: Lauf beendet - Karenzzeit - erneute Pruefung, *.recommendations.* lesen
+    PAW->>AD: EA-Revoke + Pruefung (Deadline / PAM-TTL als Backstop)
+```
+
+```powershell
+# Einmalig je Gesamtstruktur auf dem Tier-0-Host (als Administrator)
+Copy-Item .\ODA-JIT.example.psd1 C:\ODA-JIT\ODA-JIT.contoso.psd1    # anpassen
+.\Register-ODAJitTasks.ps1 -ConfigPath C:\ODA-JIT\ODA-JIT.contoso.psd1
+
+# Trockenlauf des Watchers (nur Erkennung, kein Revoke)
+.\Start-ODAJitRevokeWatcher.ps1 -ConfigPath C:\ODA-JIT\ODA-JIT.contoso.psd1 -WhatIf
+
+# Manueller Lauf außerhalb des Wochenfensters
+.\Start-ODAJitGrant.ps1 -ConfigPath C:\ODA-JIT\ODA-JIT.contoso.psd1 -StartOdaTasks
+.\Start-ODAJitRevokeWatcher.ps1 -ConfigPath C:\ODA-JIT\ODA-JIT.contoso.psd1 -WindowStart (Get-Date)
+
+# Notfall: sofort entziehen
+.\Start-ODAJitRevokeWatcher.ps1 -ConfigPath C:\ODA-JIT\ODA-JIT.contoso.psd1 -RevokeNow
+
+# Unit-Tests (Pester 5)
+Invoke-Pester .\Tests
+```
+
+| Application-Ereignis (Quelle `ODA-JIT`) | Bedeutung |
+| --------------------------------------- | --------- |
+| 1000 / 1001 | Grant OK / Grant fehlgeschlagen oder nicht auf den Standort-GCs sichtbar |
+| 1010 | Entzogen nach erfolgreichem Lauf |
+| 1011 | Entzogen — Lauf unvollständig, ohne Ergebnis oder manuell |
+| 1012 | Entzogen an der Deadline |
+| 1013 | Revoke **fehlgeschlagen** (PAM-TTL bleibt als Backstop) |
+
+**Warum 60 min Vorlauf statt 15?** Enterprise Admins ist eine universelle Gruppe im Forest-Root; der KDC der gMSA-Domäne löst sie über einen Global Catalog auf. Der Grant wird per `Sync-ADObject` übertragen und auf den GCs im Standort des Collectors geprüft — der Vorlauf ist nur Puffer für die standortübergreifende Replikation.
+
+**Mehrere Gesamtstrukturen**: eine Konfiguration, ein Ausführer-gMSA und ein Tier-0-Host **je Gesamtstruktur** (nie ein zentraler, Forest-übergreifender Ausführer). Auf Azure-Seite kann ein einzelner **Engage Center Connector** mehrere Log-Analytics-Workspace-Verbindungen halten ([Manage Log Analytics workspaces](https://learn.microsoft.com/services-hub/microsoft-engage-center/health/manage-log-analytics)); Collector (Arc) und LAW jeder Gesamtstruktur gehören in eine eigene Ressourcengruppe — das Engage Center bietet nur Maschinen aus Subscription/Ressourcengruppe des aktiven LAW an ([Manage Assessments](https://learn.microsoft.com/services-hub/microsoft-engage-center/health/manage-assessments)). Der LAW muss öffentlichen Netzwerkzugriff aktiviert lassen.
+
 ## Voraussetzungen
 
 - Windows-Betriebssystem
 - PowerShell 5.1 oder 7.x
 - **Administrator**-Rechte (erforderlich zum Ändern der WMI-Namespace-Sicherheit und der SCM-DACL)
 - Für `Invoke-ODAJitDelegation.ps1`: das **ActiveDirectory**-Modul (RSAT), eine **Tier-0**-Ausführeridentität und (empfohlen) **PAM** aktiviert (Gesamtstruktur-Funktionsebene 2016+)
+- Für die ODA-JIT-Automatisierung zusätzlich: das **ScheduledTasks**-Modul, CIM-(WinRM-)Zugriff und Lesezugriff auf die `C$`-Freigabe des Collectors vom Tier-0-Host; Pester 5 für die Tests
 
 ## Lizenz
 
