@@ -180,6 +180,13 @@ Enable-ADOptionalFeature 'Privileged Access Management Feature' -Scope ForestOrC
 > then enable in production. Note: TTL memberships look normal to most tools – only
 > `-ShowMemberTimeToLive` reveals the remaining time.
 
+> **TTL feature ≠ PIM trust/shadow principals.** For ODA-JIT (FullEA) the PAM optional feature
+> (time-bound memberships, TTL) **in the production forest** is **all** you need. It requires **no**
+> admin forest, **no** PIM trust and **no** shadow principals. Those three are a **separate,
+> optional** scenario (executor in the admin forest), described in
+> [PAM-Trust-Shadow-Principals.md](PAM-Trust-Shadow-Principals.md) – and **not** a prerequisite just
+> to enable the TTL. `Enable-ADOptionalFeature 'Privileged Access Management Feature'` is enough.
+
 Without PAM set `UsePamTtl = $false` in the configuration; the watcher deadline and monitoring
 are then the only backstop.
 
