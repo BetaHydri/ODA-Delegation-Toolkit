@@ -359,6 +359,41 @@ dasselbe gMSA bekommt an beiden Tagen für je ein kurzes Fenster EA.
 `DeadlineHours`/`TtlHours` **nicht** über mehrere Tage dehnen – EA bliebe sonst 24 h+ aktiv und der
 JIT-Zweck wäre dahin.
 
+**Startzeit oder Wochentag einer Assessment-Aufgabe ändern (läuft unter gMSA).** Müssen Kunden
+Tag/Uhrzeit anpassen, reicht `Set-ScheduledTask` mit einem neuen Trigger – der **gMSA-Principal
+bleibt erhalten** und es ist **kein Kennwort** nötig (LogonType `Password`: das OS holt das
+verwaltete Kennwort selbst). Beispiel: AD Security auf **Dienstag 07:00** (passend zu `ADAssessment`
+am Dienstag):
+
+```powershell
+# 1) Principal prüfen (UserId = DOMAIN\ODA-SVC$, LogonType = Password)
+(Get-ScheduledTask -TaskName ADSecurityAssessment).Principal
+
+# 2) Nur den Trigger ändern – gMSA bleibt unangetastet, kein Passwort nötig
+$trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Tuesday -At ([datetime]'07:00')
+Set-ScheduledTask -TaskName ADSecurityAssessment -Trigger $trigger
+
+# 2b) Nur falls Set-ScheduledTask nach dem Principal fragt: gMSA explizit (weiterhin ohne Passwort)
+$principal = New-ScheduledTaskPrincipal -UserId 'DOMAIN\ODA-SVC$' -LogonType Password -RunLevel Highest
+Set-ScheduledTask -TaskName ADSecurityAssessment -Trigger $trigger -Principal $principal
+
+# 3) Prüfen – beide auf Dienstag, RunAs = gMSA
+Get-ScheduledTask -TaskName ADAssessment, ADSecurityAssessment |
+    Select-Object TaskName,
+        @{ n = 'Start'; e = { $_.Triggers.StartBoundary } },
+        @{ n = 'RunAs'; e = { $_.Principal.UserId } }
+```
+
+- `-LogonType Password` ist für gMSA korrekt (kein Klartext-Kennwort, anders als bei einem normalen
+  Konto). `-RunLevel Highest` nur, wenn die Aufgabe bisher mit höchsten Rechten läuft (Schritt 1).
+- Ist der Aufgabenname nicht eindeutig oder liegt die Aufgabe in einem Unterordner, zusätzlich
+  `-TaskPath '\Microsoft\Operations Management Suite\…\Assessments\'` angeben (Pfad:
+  `(Get-ScheduledTask -TaskName ADSecurityAssessment).TaskPath`).
+- Danach die JIT-Konfiguration anpassen (`WindowDay`, `WindowStart` = Start der **ersten** Aufgabe,
+  `NoStartTimeoutMinutes` > Abstand zur letzten Aufgabe) und `Register-ODAJitTasks.ps1` erneut
+  ausführen.
+- Nach einem ODA-Update kann das Assessment-Setup den Trigger zurücksetzen – kurz gegenprüfen.
+
 ### Schritt 7 – Probelauf (ohne Änderungen)
 
 ```powershell
