@@ -163,6 +163,12 @@ Enable-ADOptionalFeature 'Privileged Access Management Feature' -Scope ForestOrC
 Without PAM set `UsePamTtl = $false` in the configuration; the watcher deadline and monitoring
 are then the only backstop.
 
+> **Check `EnabledScopes`.** If `EnabledScopes` in the output above is **empty**, PAM is **not**
+> enabled. Then either enable the feature (`Enable-ADOptionalFeature`, irreversible, FFL 2016) **or**
+> set `UsePamTtl = $false` – the watcher deadline and grace are then the only backstop (fine for a
+> test lab). With `UsePamTtl = $true` and PAM inactive the grant fails with an error on
+> `-MemberTimeToLive` (see section 6).
+
 ## 3. Setup per forest – step by step
 
 The examples use forest `forest-a.example`, root domain `FORESTA`, collector domain
