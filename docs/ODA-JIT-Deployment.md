@@ -25,6 +25,18 @@ FullEA mode needs **exactly six files** from the repository. All six go onto the
 | 5 | `ODAJit.Common.psm1` | **Library:** configuration, window, end detection, logging, events | imported by #1–#3 |
 | 6 | `ODAJit.example.psd1` | **Template:** copied per forest as `ODAJit.<forest>.psd1` and filled in | read by #1–#3 (`-ConfigPath`) |
 
+The following table summarizes the **capabilities and purpose** of the six scripts (complementing the
+role above):
+
+| Script | Purpose (what for) | Key capabilities | Type |
+| ------ | ------------------ | ---------------- | ---- |
+| `Register-ODAJitTasks.ps1` | One-time setup per forest | Creates the `ODA-JIT-Grant/Revoke-<Forest>` tasks, event source and log folder; compares the collector triggers with the configuration; `-Unregister` to remove; `-WhatIf` | Setup |
+| `Start-ODAJitGrant.ps1` | Grant EA **before** the window | Adds the group to Enterprise Admins with a TTL, replicates to the GCs and verifies visibility; `-StartOdaTasks` starts the ODA tasks immediately (trial run); `-WhatIf` | Runtime (grant) |
+| `Start-ODAJitRevokeWatcher.ps1` | Remove EA **after** the run | Detects the end (task state, `OMSAssessment.exe`, `*.recommendations.*`), holds the grace period, classifies the result, enforces the deadline; `-RevokeNow` (emergency), `-WindowStart` | Runtime (revoke) |
+| `Invoke-ODAJitDelegation.ps1` | The actual EA change | Adds/removes the EA membership (`-Mode FullEA`, `-operation add/delete`); do **not** call directly | Helper |
+| `ODAJit.Common.psm1` | Shared logic | Load/validate configuration, compute the window, evaluate end signals, logging, events, AD helpers | Library |
+| `ODAJit.example.psd1` | Configuration template | All per-forest parameters: accounts, collector, `OdaTaskNames`, window, timing, PAM (`UsePamTtl`) | Configuration |
+
 ```mermaid
 flowchart TD
     R["Register-ODAJitTasks.ps1<br/>(once)"] -- creates --> TG["Task ODA-JIT-Grant-FOREST"]

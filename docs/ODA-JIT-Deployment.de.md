@@ -27,6 +27,18 @@ und die DCs wird **nichts** kopiert.
 | 5 | `ODAJit.Common.psm1` | **Bibliothek:** Konfiguration, Zeitfenster, Ende-Erkennung, Logging, Events | wird von Nr. 1–3 importiert |
 | 6 | `ODAJit.example.psd1` | **Vorlage:** wird je Forest als `ODAJit.<forest>.psd1` kopiert und ausgefüllt | wird von Nr. 1–3 gelesen (`-ConfigPath`) |
 
+Die folgende Tabelle fasst **Fähigkeiten und Zweck** der sechs Skripte zusammen (ergänzend zur
+Rolle oben):
+
+| Skript | Zweck (wofür) | Wichtigste Fähigkeiten | Typ |
+| ------ | ------------- | ---------------------- | --- |
+| `Register-ODAJitTasks.ps1` | Einmalige Einrichtung je Forest | Legt die Aufgaben `ODA-JIT-Grant/Revoke-<Forest>`, Ereignisquelle und Log-Ordner an; vergleicht die Collector-Trigger mit der Konfiguration; `-Unregister` zum Entfernen; `-WhatIf` | Einrichtung |
+| `Start-ODAJitGrant.ps1` | EA **vor** dem Fenster vergeben | Nimmt die Gruppe mit TTL in Enterprise Admins auf, repliziert auf die GCs und prüft die Sichtbarkeit; `-StartOdaTasks` startet die ODA-Aufgaben sofort (Testlauf); `-WhatIf` | Laufzeit (Grant) |
+| `Start-ODAJitRevokeWatcher.ps1` | EA **nach** dem Lauf entziehen | Erkennt das Ende (Task-Status, `OMSAssessment.exe`, `*.recommendations.*`), hält die Karenzzeit, klassifiziert das Ergebnis, erzwingt die Deadline; `-RevokeNow` (Notfall), `-WindowStart` | Laufzeit (Revoke) |
+| `Invoke-ODAJitDelegation.ps1` | Eigentliche EA-Änderung | Setzt bzw. entfernt die EA-Mitgliedschaft (`-Mode FullEA`, `-operation add/delete`); **nicht** direkt aufrufen | Hilfsskript |
+| `ODAJit.Common.psm1` | Gemeinsame Logik | Konfiguration laden/prüfen, Zeitfenster berechnen, Ende-Signale auswerten, Logging, Events, AD-Helfer | Bibliothek |
+| `ODAJit.example.psd1` | Konfigurationsvorlage | Alle Parameter je Forest: Konten, Collector, `OdaTaskNames`, Fenster, Timing, PAM (`UsePamTtl`) | Konfiguration |
+
 ```mermaid
 flowchart TD
     R["Register-ODAJitTasks.ps1<br/>(einmalig)"] -- legt an --> TG["Aufgabe ODA-JIT-Grant-FOREST"]
