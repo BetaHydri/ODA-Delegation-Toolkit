@@ -320,6 +320,34 @@ Get-ScheduledTask -TaskName ADAssessment, ADSecurityAssessment |
 `Register-ODAJitTasks.ps1` compares the triggers with the configuration in step 8 and warns on
 mismatches.
 
+Both ODA tasks must run on the **same weekday**. The JIT window covers exactly one `WindowDay`. If
+`ADAssessment` and `ADSecurityAssessment` run on **different days** (different `StartBoundary` in the
+command above), the watcher treats the task missing on the window day as *not run* (`Incomplete`)
+after `NoStartTimeoutMinutes`, removes EA – and the assessment on the other day runs **without** EA,
+i.e. with incomplete results.
+
+**Option A (recommended): put both triggers on the same day.** Back-to-back, matching
+`WindowDay`/`WindowStart` (e.g. Sunday 02:00 and 02:30):
+
+```powershell
+Set-ScheduledTask -TaskName ADAssessment         -Trigger (New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At 02:00)
+Set-ScheduledTask -TaskName ADSecurityAssessment -Trigger (New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At 02:30)
+```
+
+**Option B (keep separate days): two JIT windows.** One config/grant/watcher pair per day with
+**only one** assessment in `OdaTaskNames` and a **distinct `ForestName` label** (otherwise the task
+names `ODA-JIT-Grant-<ForestName>` collide). `AccountGroupDN`, `ForestRootServer`,
+`SiteGlobalCatalogs`, `Collector` and `ExecutorAccount` stay identical; the same gMSA gets EA for one
+short window on each day.
+
+| Config | `ForestName` | `WindowDay` / `WindowStart` | `OdaTaskNames` |
+| ------ | ------------ | --------------------------- | -------------- |
+| `ODAJit.<forest>-ad.psd1` | `forest-a-ad` | Tuesday / 06:00 | `@('ADAssessment')` |
+| `ODAJit.<forest>-adsec.psd1` | `forest-a-adsec` | Wednesday / 05:43 | `@('ADSecurityAssessment')` |
+
+Do **not** stretch `DeadlineHours`/`TtlHours` across several days – EA would stay active for 24 h+
+and defeat the JIT purpose.
+
 ### Step 7 – Trial run (no changes)
 
 ```powershell
@@ -414,5 +442,6 @@ contradicts the forest separation. **Not recommended.**
 | Watcher: "Collector query failed" | WinRM blocked or executor not local admin on the collector server | `Test-WSMan`, firewall 5985, step 3 |
 | Watcher: "Result file check failed" | No access to the collector server's `C$` | Firewall 445, local admin on the collector server, check `WorkingDirectory` |
 | Watcher always ends at the deadline (event 1012) | ODA task schedule does not match `WindowDay`/`WindowStart`, wrong `OdaTaskNames` | Step 6; the log shows `Missing=[…]` |
+| Watcher ends with `Incomplete`, one assessment missing (event 1013) | `ADAssessment` and `ADSecurityAssessment` run on **different days** | Put both on the same `WindowDay` (step 6, option A) or use two separate windows (option B) |
 | No events in the Application log | Event source missing | Run `Register-ODAJitTasks.ps1` elevated |
 | Script does not start ("not digitally signed") | Internet mark or `AllSigned` without signature | `Unblock-File` or sign the scripts |
