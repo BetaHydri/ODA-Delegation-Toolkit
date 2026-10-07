@@ -14,8 +14,8 @@
 
     # --- Collector / ODA ------------------------------------------------------------------
     Collector          = 'ODA-COL-CONTOSO.child1.contoso.com'   # FQDN of the on-prem server (not the Azure Arc resource name)
-    WorkingDirectory   = 'C:\Assessments'                  # ODA WorkingDirectory on the collector
-    OdaTaskNames       = @('ADAssessment', 'ADSecurityAssessment')
+    WorkingDirectory   = 'C:\Assessments'                  # folder with the *Assessment subfolders (ODA-version dependent, e.g. C:\MicrosoftAssessments\Collect)
+    OdaTaskNames       = @('ADAssessment', 'ADSecurityAssessment')  # only assessments needing Enterprise Admins (NOT WindowsServerAssessment)
     OdaProcessNames    = @('OMSAssessment.exe')
 
     # --- Weekly window (must match the ODA task schedule on the collector) ----------------

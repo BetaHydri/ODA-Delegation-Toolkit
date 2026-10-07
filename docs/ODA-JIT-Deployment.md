@@ -91,7 +91,7 @@ flowchart LR
 | Scheduled tasks `\ODA-JIT\ODA-JIT-Grant-<Forest>` and `ODA-JIT-Revoke-<Forest>` | Tier-0 host | Created by `Register-ODAJitTasks.ps1`, run as the executor gMSA |
 | Executor gMSA `svc-ODA-JIT$` | AD, forest root domain | One account **per forest**, standing Tier-0 |
 | Assessment gMSA (e.g. `gMSA-ODA$`) | AD, collector's domain | Member of a **fixed group**; that group is added to Enterprise Admins just in time |
-| ODA tasks `ADAssessment`, `ADSecurityAssessment` | Collector server | Unchanged; only the schedule is fixed |
+| ODA tasks `ADAssessment`, `ADSecurityAssessment` | Collector server | Unchanged; only the schedule is fixed. Other assessments on the same collector (e.g. `WindowsServerAssessment` for member servers) run independently and need **no** Enterprise Admins JIT |
 
 > **One Tier-0 host per forest.** The forests are separate. A central host with an account that
 > can modify Enterprise Admins in several forests would break that separation. Each forest
@@ -244,12 +244,24 @@ notepad 'C:\ODA-JIT\Config\ODAJit.forest-a.psd1'
 | `SiteGlobalCatalogs` | GCs in the collector's AD site | site: `nltest /dsgetsite` on the collector; then `Get-ADDomainController -Filter "IsGlobalCatalog -eq 'True' -and Site -eq '<site>'" -Server child.forest-a.example` |
 | `ExecutorAccount` | Executor gMSA | `FORESTA\svc-ODA-JIT$` |
 | `Collector` | **FQDN of the on-prem collector server** (not the Arc resource name) | `ODA-COL-A.child.forest-a.example` |
-| `WorkingDirectory` | Working directory of the ODA tasks on the collector | `C:\Assessments` |
-| `OdaTaskNames` | Names of the ODA tasks | default `ADAssessment`, `ADSecurityAssessment` |
+| `WorkingDirectory` | Folder on the collector that holds the `*Assessment` subfolders | ODA-version dependent: `C:\Assessments` or `C:\MicrosoftAssessments\Collect`. The watcher reads **all** `*Assessment` folders below it (`*.recommendations.*`) |
+| `OdaTaskNames` | Names of the ODA tasks that require Enterprise Admins | default `ADAssessment`, `ADSecurityAssessment`. List **only** the AD assessments; leave out assessments that do not need EA (e.g. `WindowsServerAssessment`) |
 | `WindowDay` / `WindowStart` | Weekday (English) and start time of the **first** ODA task | must match the schedule on the collector (step 6) |
 | `GrantLeadMinutes`, `GraceMinutes`, `NoStartTimeoutMinutes`, `DeadlineHours`, `TtlHours` | Timing | default 60 / 30 / 90 / 6 / 8. Deadline ≥ 3× longest measured run; TTL > lead + deadline |
 | `UsePamTtl` | Use the PAM TTL | `$false` if PAM is not enabled (2.4) |
 | `LogDirectory` | Log folder | `C:\ODA-JIT\Logs` |
+
+> **One task pair per forest is enough.** `OdaTaskNames` is a **list** – a single Grant/Watcher
+> pair covers **all** listed AD assessments. The watcher removes EA only after **every** listed task
+> has ended, and `WorkingDirectory` is **one** folder under which it discovers the `*Assessment`
+> subfolders itself – no separate watcher, task, or path per assessment.
+>
+> **Only the AD assessments belong in the JIT flow.** A collector often runs further ODA
+> assessments (e.g. `WindowsServerAssessment` for member servers). These have their own
+> prerequisites (local admin/WinRM on the target servers) and need **no** Enterprise Admins, so they
+> must **not** appear in `OdaTaskNames` – otherwise the watcher waits for a task unrelated to the EA
+> window. `WorkingDirectory` points to the folder holding the `*Assessment` subfolders – depending
+> on the install, `C:\Assessments` or `C:\MicrosoftAssessments\Collect`.
 
 Validate the configuration:
 

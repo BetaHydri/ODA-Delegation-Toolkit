@@ -96,7 +96,7 @@ flowchart LR
 | Geplante Aufgaben `\ODA-JIT\ODA-JIT-Grant-<Forest>` und `ODA-JIT-Revoke-<Forest>` | Tier-0-Host | Werden von `Register-ODAJitTasks.ps1` angelegt, laufen als Ausführer-gMSA |
 | Ausführer-gMSA `svc-ODA-JIT$` | AD, Forest-Root-Domäne | Ein Konto **pro Forest**, dauerhaft Tier-0 |
 | Assessment-gMSA (z. B. `gMSA-ODA$`) | AD, Domäne des Collectors | Mitglied einer **festen Gruppe**. Diese Gruppe wird per JIT in Enterprise Admins aufgenommen |
-| ODA-Aufgaben `ADAssessment`, `ADSecurityAssessment` | Collector-Server | Unverändert, nur der Zeitplan wird festgelegt |
+| ODA-Aufgaben `ADAssessment`, `ADSecurityAssessment` | Collector-Server | Unverändert, nur der Zeitplan wird festgelegt. Weitere Assessments auf demselben Collector (z. B. `WindowsServerAssessment` für Member-Server) laufen unabhängig und brauchen **kein** Enterprise-Admins-JIT |
 
 > **Ein Tier-0-Host pro Forest.** Die Forests sind voneinander getrennt. Ein zentraler Host mit
 > einem Konto, das in mehreren Forests Enterprise Admins ändern darf, würde diese Trennung
@@ -251,12 +251,26 @@ notepad 'C:\ODA-JIT\Config\ODAJit.forest-a.psd1'
 | `SiteGlobalCatalogs` | GCs im AD-Standort des Collectors | Standort: `nltest /dsgetsite` auf dem Collector; dann `Get-ADDomainController -Filter "IsGlobalCatalog -eq 'True' -and Site -eq '<Standort>'" -Server child.forest-a.example` |
 | `ExecutorAccount` | Ausführer-gMSA | `FORESTA\svc-ODA-JIT$` |
 | `Collector` | **FQDN des Collector-Servers on-prem** (nicht der Name des Arc-Objekts) | `ODA-COL-A.child.forest-a.example` |
-| `WorkingDirectory` | Arbeitsverzeichnis der ODA-Aufgaben auf dem Collector | `C:\Assessments` |
-| `OdaTaskNames` | Namen der ODA-Aufgaben | Standard `ADAssessment`, `ADSecurityAssessment` |
+| `WorkingDirectory` | Ordner auf dem Collector, der die `*Assessment`-Unterordner enthält | Je nach ODA-Version `C:\Assessments` oder `C:\MicrosoftAssessments\Collect`. Der Watcher liest darunter **alle** `*Assessment`-Ordner (`*.recommendations.*`) |
+| `OdaTaskNames` | Namen der ODA-Aufgaben, die Enterprise Admins brauchen | Standard `ADAssessment`, `ADSecurityAssessment`. **Nur** die AD-Assessments eintragen; Assessments ohne EA-Bedarf (z. B. `WindowsServerAssessment`) hier weglassen |
 | `WindowDay` / `WindowStart` | Wochentag (englisch) und Startzeit der **ersten** ODA-Aufgabe | muss zum Zeitplan auf dem Collector passen (Schritt 6) |
 | `GrantLeadMinutes`, `GraceMinutes`, `NoStartTimeoutMinutes`, `DeadlineHours`, `TtlHours` | Zeitsteuerung | Standard 60 / 30 / 90 / 6 / 8. Deadline ≥ 3× längste gemessene Laufzeit; TTL > Vorlauf + Deadline |
 | `UsePamTtl` | PAM-TTL verwenden | `$false`, falls PAM nicht aktiv ist (2.4) |
 | `LogDirectory` | Log-Ordner | `C:\ODA-JIT\Logs` |
+
+> **Ein Aufgabenpaar pro Forest reicht.** `OdaTaskNames` ist eine **Liste** – ein einziges
+> Grant-/Watcher-Paar deckt **alle** aufgeführten AD-Assessments ab. Der Watcher entzieht EA erst,
+> wenn **alle** aufgeführten Aufgaben beendet sind, und `WorkingDirectory` ist **ein** Ordner, unter
+> dem er die `*Assessment`-Unterordner selbst findet – kein eigener Watcher, keine Aufgabe und kein
+> Pfad je Assessment.
+>
+> **Nur die AD-Assessments gehören in den JIT-Ablauf.** Ein Collector führt oft weitere
+> ODA-Assessments aus (z. B. `WindowsServerAssessment` für Member-Server). Diese haben eigene
+> Voraussetzungen (lokaler Admin/WinRM auf den Zielservern) und brauchen **keine** Enterprise
+> Admins. Sie dürfen deshalb **nicht** in `OdaTaskNames` stehen, sonst wartet der Watcher auf eine
+> Aufgabe, die mit dem EA-Fenster nichts zu tun hat. `WorkingDirectory` zeigt auf den Ordner, der
+> die `*Assessment`-Unterordner enthält – je nach Installation `C:\Assessments` oder
+> `C:\MicrosoftAssessments\Collect`.
 
 Ob die Konfiguration gültig ist, prüft man so:
 
