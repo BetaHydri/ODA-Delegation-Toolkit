@@ -167,6 +167,15 @@ Get-ADOptionalFeature -Filter "Name -eq 'Privileged Access Management Feature'" 
 Enable-ADOptionalFeature 'Privileged Access Management Feature' -Scope ForestOrConfigurationSet -Target '<forest.dns>'
 ```
 
+> **Ist das Aktivieren sicher? (FFL 2016+)** Ja. Das Einschalten des Features ist für sich genommen
+> **nicht disruptiv**: Es schaltet nur die Möglichkeit zeitgebundener Gruppenmitgliedschaften frei
+> und ändert **keine** bestehende Gruppe, Mitgliedschaft, ACL oder Replikation – nichts erhält
+> rückwirkend eine TTL. Es ist **kein** Schema-Update, **kein** DC-Upgrade und **kein** AD Recycle
+> Bin, MIM, Admin-Forest oder Trust nötig. Einziger wichtiger Punkt: Die Aktivierung ist
+> **irreversibel** und gilt **forest-weit**. Daher vorab im Lab testen, dokumentieren und abstimmen,
+> dann in der Produktion aktivieren. Hinweis: TTL-Mitgliedschaften sehen für die meisten Tools
+> normal aus – die Restlaufzeit zeigt nur `-ShowMemberTimeToLive`.
+
 Ohne PAM in der Konfiguration `UsePamTtl = $false` setzen. Dann sind Watcher-Deadline und
 Monitoring die einzige Absicherung.
 
@@ -175,6 +184,26 @@ Monitoring die einzige Absicherung.
 > **oder** `UsePamTtl = $false` setzen – danach sind Watcher-Deadline und Grace die einzige
 > Absicherung (für ein Testlab in Ordnung). Bei `UsePamTtl = $true` ohne aktives PAM bricht der
 > Grant mit einem Fehler bei `-MemberTimeToLive` ab (siehe Abschnitt 6).
+
+**Nur zur Info – PAM manuell nutzen.** Ist das PAM-Feature aktiv, können Forest-Admins dieselbe
+Technik auch **ad hoc** und **unabhängig von ODA-JIT** verwenden, um sich (oder ein anderes Konto)
+zeitgebunden in eine geschützte Gruppe wie Enterprise Admins oder Domain Admins aufzunehmen. Die
+Mitgliedschaft läuft nach der TTL von selbst ab – kein manuelles Entfernen und kein Reset durch
+AdminSDHolder/SDProp nötig:
+
+```powershell
+# Zeitgebundene Aufnahme (läuft nach 60 Minuten automatisch ab)
+Add-ADGroupMember -Identity 'Enterprise Admins' -Members 'FORESTA\admin' `
+    -MemberTimeToLive (New-TimeSpan -Minutes 60)
+
+# Verbleibende TTL der Mitglieder anzeigen (Restsekunden im Präfix <TTL=...>)
+Get-ADGroup 'Enterprise Admins' -ShowMemberTimeToLive -Properties member |
+    Select-Object -ExpandProperty member
+```
+
+Voraussetzung ist dieselbe wie oben (PAM aktiv, FFL 2016). Ohne aktives PAM schlägt
+`-MemberTimeToLive` fehl. Diese manuelle Nutzung ist nicht Teil von ODA-JIT und wird hier nur zur
+Information gezeigt.
 
 ## 3. Einrichtung je Forest – Schritt für Schritt
 

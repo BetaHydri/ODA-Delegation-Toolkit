@@ -160,6 +160,14 @@ Get-ADOptionalFeature -Filter "Name -eq 'Privileged Access Management Feature'" 
 Enable-ADOptionalFeature 'Privileged Access Management Feature' -Scope ForestOrConfigurationSet -Target '<forest.dns>'
 ```
 
+> **Is enabling it safe? (FFL 2016+)** Yes. Turning the feature on is **non-disruptive** by itself:
+> it only unlocks time-bound group memberships and changes **no** existing group, membership, ACL or
+> replication – nothing receives a TTL retroactively. It needs **no** schema update, **no** DC
+> upgrade and **no** AD Recycle Bin, MIM, admin forest or trust. The one key point: enabling is
+> **irreversible** and applies **forest-wide**. So validate in a lab, document it and get sign-off,
+> then enable in production. Note: TTL memberships look normal to most tools – only
+> `-ShowMemberTimeToLive` reveals the remaining time.
+
 Without PAM set `UsePamTtl = $false` in the configuration; the watcher deadline and monitoring
 are then the only backstop.
 
@@ -168,6 +176,25 @@ are then the only backstop.
 > set `UsePamTtl = $false` – the watcher deadline and grace are then the only backstop (fine for a
 > test lab). With `UsePamTtl = $true` and PAM inactive the grant fails with an error on
 > `-MemberTimeToLive` (see section 6).
+
+**For information only – using PAM manually.** When the PAM feature is enabled, forest admins can
+use the same technique **ad hoc** and **independently of ODA-JIT** to add themselves (or another
+account) to a protected group such as Enterprise Admins or Domain Admins for a limited time. The
+membership expires on its own after the TTL – no manual removal and no reset by AdminSDHolder/SDProp:
+
+```powershell
+# Time-bound membership (expires automatically after 60 minutes)
+Add-ADGroupMember -Identity 'Enterprise Admins' -Members 'FORESTA\admin' `
+    -MemberTimeToLive (New-TimeSpan -Minutes 60)
+
+# Show the remaining TTL of the members (seconds left in the <TTL=...> prefix)
+Get-ADGroup 'Enterprise Admins' -ShowMemberTimeToLive -Properties member |
+    Select-Object -ExpandProperty member
+```
+
+The prerequisite is the same as above (PAM enabled, FFL 2016). Without active PAM,
+`-MemberTimeToLive` fails. This manual use is not part of ODA-JIT and is shown here for information
+only.
 
 ## 3. Setup per forest – step by step
 
