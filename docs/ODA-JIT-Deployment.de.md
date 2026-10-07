@@ -420,6 +420,25 @@ Am einfachsten registriert man dazu die Aufgaben (Schritt 8) und startet sie man
 Prüfen: Grant-Log OK, Event 1000; Watcher erkennt Ende → Event 1010; das gMSA ist danach nicht
 mehr in Enterprise Admins; die ODA-Ergebnisse sind vollständig (keine leeren Tabellenblätter).
 
+> **Info – was „echter Testlauf" bedeutet.** Der erste Block (`-WhatIf`) ändert **nichts**: kein
+> Grant, kein Assessment-Start, kein Revoke – nur Vorprüfungen. Der zweite Block ist der
+> **Live-Test**: `-StartOdaTasks` setzt EA **wirklich** und startet die ODA-Aufgaben sofort, der
+> Watcher (`-WindowStart (Get-Date)`) wartet auf das Ende und entzieht EA wieder. Daher am besten in
+> einem Wartungsfenster/Lab.
+>
+> **Info – `-StartOdaTasks` legt keine ODA-Aufgabe an.** Die Aufgaben `ADAssessment` /
+> `ADSecurityAssessment` müssen auf dem Collector **bereits existieren** (angelegt durch das
+> ODA-/On-Demand-Assessment-Setup, nicht durch dieses Toolkit). `-StartOdaTasks` **startet** nur die
+> vorhandenen Aufgaben sofort (per CIM, `Start-ScheduledTask`) statt auf den Wochen-Trigger zu
+> warten. Fehlt eine Aufgabe (falscher Name), legt das Skript sie **nicht** an, sondern warnt:
+> `ODA task(s) not found on <Collector>: … - check OdaTaskNames`.
+>
+> **Info – „im Kontext des Ausführer-gMSA".** Grant/Watcher müssen als `svc-ODA-JIT$` laufen (nur
+> dieses Konto hat die EA- und Collector-Rechte). Am einfachsten die JIT-Aufgaben aus Schritt 8
+> registrieren und in der Aufgabenplanung manuell per **„Ausführen"** starten – dann laufen sie als
+> gMSA. Startet man die `.ps1` direkt in einer Admin-Shell, laufen sie als das eigene Konto, nicht
+> als gMSA.
+
 ### Schritt 8 – Geplante Aufgaben registrieren
 
 In einer **PowerShell als Administrator** auf dem Tier-0-Host:

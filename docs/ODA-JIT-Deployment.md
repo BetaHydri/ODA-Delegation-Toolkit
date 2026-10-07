@@ -407,6 +407,24 @@ simplest way is to register the tasks (step 8) and start them manually:
 Check: grant log OK, event 1000; the watcher detects the end → event 1010; the gMSA is no longer
 in Enterprise Admins; the ODA results are complete (no empty sheets).
 
+> **Info – what "real trial run" means.** The first block (`-WhatIf`) changes **nothing**: no grant,
+> no assessment start, no revoke – only pre-checks. The second block is the **live test**:
+> `-StartOdaTasks` **actually** sets EA and starts the ODA tasks immediately, and the watcher
+> (`-WindowStart (Get-Date)`) waits for the end and removes EA again. Best done in a maintenance
+> window/lab.
+>
+> **Info – `-StartOdaTasks` does not create an ODA task.** The `ADAssessment` / `ADSecurityAssessment`
+> tasks must **already exist** on the collector (created by the ODA / On-Demand Assessment setup, not
+> by this toolkit). `-StartOdaTasks` only **starts** the existing tasks immediately (via CIM,
+> `Start-ScheduledTask`) instead of waiting for the weekly trigger. If a task is missing (wrong name),
+> the script does **not** create it but warns: `ODA task(s) not found on <Collector>: … - check
+> OdaTaskNames`.
+>
+> **Info – "in the context of the executor gMSA".** Grant/watcher must run as `svc-ODA-JIT$` (only
+> that account has the EA and collector rights). Easiest: register the JIT tasks from step 8 and start
+> them manually via **"Run"** in Task Scheduler – then they run as the gMSA. If you call the `.ps1`
+> directly in an admin shell, they run as your own account, not the gMSA.
+
 ### Step 8 – Register the scheduled tasks
 
 In an **elevated PowerShell** on the Tier-0 host:
