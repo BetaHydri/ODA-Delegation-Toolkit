@@ -58,6 +58,38 @@ Describe 'Test-ODAJitConfig' {
     It 'loads the shipped example config' {
         { Import-ODAJitConfig -Path (Join-Path $PSScriptRoot '..\ODAJit.example.psd1') } | Should -Not -Throw
     }
+    It 'defaults OdaTaskPath to empty and normalizes it to a folder prefix' {
+        (New-TestConfig).OdaTaskPath | Should -Be ''
+        (New-TestConfig @{ OdaTaskPath = 'Microsoft\OMS\AOI-1' }).OdaTaskPath | Should -Be '\Microsoft\OMS\AOI-1\'
+        (New-TestConfig @{ OdaTaskPath = '\Microsoft\OMS\AOI-1\' }).OdaTaskPath | Should -Be '\Microsoft\OMS\AOI-1\'
+    }
+}
+
+Describe 'Select-ODAJitTask' {
+    BeforeAll {
+        $script:tasks = @(
+            [pscustomobject]@{ TaskName = 'ADAssessment'; TaskPath = '\Microsoft\OMS\AOI-old\Assessments\ADAssessment\' }
+            [pscustomobject]@{ TaskName = 'ADSecurityAssessment'; TaskPath = '\Microsoft\OMS\AOI-old\Assessments\ADSecurityAssessment\' }
+            [pscustomobject]@{ TaskName = 'ADAssessment'; TaskPath = '\Microsoft\OMS\AOI-new\Assessments\ADAssessment\' }
+            [pscustomobject]@{ TaskName = 'ADSecurityAssessment'; TaskPath = '\Microsoft\OMS\AOI-new\Assessments\ADSecurityAssessment\' }
+            [pscustomobject]@{ TaskName = 'WindowsServerAssessment'; TaskPath = '\Microsoft\OMS\AOI-new\Assessments\WindowsServerAssessment\' }
+        )
+    }
+    It 'matches by name only when OdaTaskPath is empty (backward compatible)' {
+        @($script:tasks | Select-ODAJitTask -Config (New-TestConfig)).Count | Should -Be 4
+    }
+    It 'restricts to the configured task folder' {
+        $r = @($script:tasks | Select-ODAJitTask -Config (New-TestConfig @{ OdaTaskPath = '\Microsoft\OMS\AOI-new\' }))
+        $r.Count | Should -Be 2
+        ($r.TaskPath -notlike '*AOI-new*').Count | Should -Be 0
+    }
+    It 'ignores the case of the folder and does not treat brackets as wildcards' {
+        @($script:tasks | Select-ODAJitTask -Config (New-TestConfig @{ OdaTaskPath = '\microsoft\oms\aoi-NEW\' })).Count | Should -Be 2
+        @($script:tasks | Select-ODAJitTask -Config (New-TestConfig @{ OdaTaskPath = '\Microsoft\OMS\AOI-[nx]ew\' })).Count | Should -Be 0
+    }
+    It 'returns nothing when the folder does not exist' {
+        @($script:tasks | Select-ODAJitTask -Config (New-TestConfig @{ OdaTaskPath = '\Other\' })).Count | Should -Be 0
+    }
 }
 
 Describe 'Get-ODAJitTriggerTimes' {

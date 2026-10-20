@@ -163,7 +163,7 @@ if ($cfg.SiteGlobalCatalogs.Count -gt 0) {
 if ($StartOdaTasks) {
     $session = New-CimSession -ComputerName $cfg.Collector
     try {
-        foreach ($t in @(Get-ScheduledTask -CimSession $session | Where-Object { $_.TaskName -in $cfg.OdaTaskNames })) {
+        foreach ($t in @(Get-ScheduledTask -CimSession $session | Select-ODAJitTask -Config $cfg)) {
             Start-ScheduledTask -CimSession $session -TaskName $t.TaskName -TaskPath $t.TaskPath
             Write-ODAJitLog "Started ODA task $($t.TaskPath)$($t.TaskName) on $($cfg.Collector)" 'OK'
         }

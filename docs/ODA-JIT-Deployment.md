@@ -35,7 +35,7 @@ role above):
 | `Start-ODAJitRevokeWatcher.ps1` | Remove EA **after** the run | Detects the end (task state, `OMSAssessment.exe`, `*.recommendations.*`), holds the grace period, classifies the result, enforces the deadline; `-RevokeNow` (emergency), `-WindowStart` | Runtime (revoke) |
 | `Invoke-ODAJitDelegation.ps1` | The actual EA change | Adds/removes the EA membership (`-Mode FullEA`, `-operation add/delete`); do **not** call directly | Helper |
 | `ODAJit.Common.psm1` | Shared logic | Load/validate configuration, compute the window, evaluate end signals, logging, events, AD helpers | Library |
-| `ODAJit.example.psd1` | Configuration template | All per-forest parameters: accounts, collector, `OdaTaskNames`, window, timing, PAM (`UsePamTtl`) | Configuration |
+| `ODAJit.example.psd1` | Configuration template | All per-forest parameters: accounts, collector, `OdaTaskNames`, `OdaTaskPath` (optional), window, timing, PAM (`UsePamTtl`) | Configuration |
 
 ```mermaid
 flowchart TD
@@ -298,6 +298,7 @@ notepad 'C:\ODA-JIT\Config\ODAJit.forest-a.psd1'
 | `Collector` | **FQDN of the on-prem collector server** (not the Arc resource name) | `ODA-COL-A.child.forest-a.example` |
 | `WorkingDirectory` | Folder on the collector that holds the `*Assessment` subfolders | ODA-version dependent: `C:\Assessments` or `C:\MicrosoftAssessments\Collect`. The watcher reads **all** `*Assessment` folders below it (`*.recommendations.*`) |
 | `OdaTaskNames` | Names of the ODA tasks that require Enterprise Admins | default `ADAssessment`, `ADSecurityAssessment`. List **only** the AD assessments; leave out assessments that do not need EA (e.g. `WindowsServerAssessment`) |
+| `OdaTaskPath` | Optional: task folder (prefix) of **one** ODA instance | Only needed when several ODA instances run on the collector (see below). Example `\Microsoft\Operations Management Suite\AOI-<WorkspaceId>\`. Empty = filter by `OdaTaskNames` only |
 | `WindowDay` / `WindowStart` | Weekday (English) and start time of the **first** ODA task | must match the schedule on the collector (step 6) |
 | `GrantLeadMinutes`, `GraceMinutes`, `NoStartTimeoutMinutes`, `DeadlineHours`, `TtlHours` | Timing | default 60 / 30 / 90 / 6 / 8. Deadline ≥ 3× longest measured run; TTL > lead + deadline |
 | `UsePamTtl` | Use the PAM TTL | `$false` if PAM is not enabled (2.4) |
@@ -314,6 +315,37 @@ notepad 'C:\ODA-JIT\Config\ODAJit.forest-a.psd1'
 > must **not** appear in `OdaTaskNames` – otherwise the watcher waits for a task unrelated to the EA
 > window. `WorkingDirectory` points to the folder holding the `*Assessment` subfolders – depending
 > on the install, `C:\Assessments` or `C:\MicrosoftAssessments\Collect`.
+
+**Running next to an existing ODA instance (e.g. the delegation variant).** Each ODA instance (one
+Log Analytics workspace each) keeps its tasks in its own folder:
+`\Microsoft\Operations Management Suite\AOI-<WorkspaceId>\Assessments\<Assessment>\`. Both instances
+use the same task names (`ADAssessment`, `ADSecurityAssessment`) and differ only in the folder. To make
+the JIT scripts start and watch only **their own** tasks, set `OdaTaskPath` to the folder of the
+FullEA instance:
+
+```powershell
+# On the collector: show folder and account of all ODA tasks
+Get-ScheduledTask -TaskPath '\Microsoft\Operations Management Suite\*' |
+    Select-Object TaskPath, TaskName, @{ n = 'RunAs'; e = { $_.Principal.UserId } }
+```
+
+```powershell
+# ODAJit.<forest>.psd1 – only the tasks of the FullEA instance
+OdaTaskPath      = '\Microsoft\Operations Management Suite\AOI-<WorkspaceId-FullEA>\'
+WorkingDirectory = 'C:\Assessments-FullEA'   # own folder per instance (-WorkingDirectory when creating the task)
+```
+
+- Use a **separate workspace** and a **separate `-WorkingDirectory`** for the FullEA instance. Running
+  the same assessment type (e.g. `ADAssessment`) more than once on one machine requires a
+  **dedicated Log Analytics workspace Azure resource (LAW) per instance**: each LAW has its own
+  WorkspaceId, and the task folder `AOI-<WorkspaceId>` is derived from it. The
+  `AOI-<WorkspaceId>` folder appears once the new workspace is added to the connector and the task
+  is created, so `OdaTaskPath` can only be filled in afterwards.
+- Put the FullEA gMSA in its **own** JIT group. The gMSA of the other instance must **not** be a member.
+- Schedule the runs on **different weekdays**. The watcher's process check (`OdaProcessNames`) cannot
+  tell the instances apart; a foreign run in progress would only delay the EA removal (the deadline
+  still applies).
+- A path that matches nothing is reported by the grant as `ODA task(s) not found …`.
 
 Validate the configuration:
 
@@ -516,6 +548,7 @@ contradicts the forest separation. **Not recommended.**
 | Error on `-MemberTimeToLive` | PAM feature not enabled | Enable PAM (2.4) or `UsePamTtl = $false` |
 | Watcher: "Collector query failed" | WinRM blocked or executor not local admin on the collector server | `Test-WSMan`, firewall 5985, step 3 |
 | Watcher: "Result file check failed" | No access to the collector server's `C$` | Firewall 445, local admin on the collector server, check `WorkingDirectory` |
+| Grant: "ODA task(s) not found" although the tasks exist | `OdaTaskPath` points to the wrong `AOI-<WorkspaceId>` folder (several ODA instances on the collector) | List the tasks with `Get-ScheduledTask -TaskPath '\Microsoft\Operations Management Suite\*'` and copy the folder of the correct instance (step 5) |
 | Watcher always ends at the deadline (event 1012) | ODA task schedule does not match `WindowDay`/`WindowStart`, wrong `OdaTaskNames` | Step 6; the log shows `Missing=[…]` |
 | Watcher ends with `Incomplete`, one assessment missing (event 1013) | `ADAssessment` and `ADSecurityAssessment` run on **different days** | Put both on the same `WindowDay` (step 6, option A) or use two separate windows (option B) |
 | No events in the Application log | Event source missing | Run `Register-ODAJitTasks.ps1` elevated |

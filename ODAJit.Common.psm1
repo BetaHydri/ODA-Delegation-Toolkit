@@ -76,7 +76,8 @@ function Write-ODAJitEvent {
 $script:ConfigDefaults = @{
     SiteGlobalCatalogs        = @()
     OdaTaskNames              = @('ADAssessment', 'ADSecurityAssessment')
-    OdaProcessNames           = @('OMSAssessment.exe')
+    OdaTaskPath               = ''
+    OdaProcessNames            = @('OMSAssessment.exe')
     GrantLeadMinutes          = 60
     WatcherStartOffsetMinutes = 15
     PollMinutes               = 5
@@ -145,6 +146,13 @@ function Test-ODAJitConfig {
     $cfg.OdaTaskNames = @($cfg.OdaTaskNames | Where-Object { $_ })
     $cfg.OdaProcessNames = @($cfg.OdaProcessNames | Where-Object { $_ })
     if ($cfg.OdaTaskNames.Count -eq 0) { throw 'ODA-JIT config: OdaTaskNames must contain at least one task name.' }
+    # Normalized to '\...\' so it works as a folder prefix (ODA tasks sit in ...\AOI-<WorkspaceId>\Assessments\<Name>\)
+    $taskPath = ([string]$cfg.OdaTaskPath).Trim()
+    if ($taskPath) {
+        if (-not $taskPath.StartsWith('\')) { $taskPath = '\' + $taskPath }
+        if (-not $taskPath.EndsWith('\')) { $taskPath += '\' }
+    }
+    $cfg.OdaTaskPath = $taskPath
     if ($cfg.OdaProcessNames.Count -eq 0) { throw 'ODA-JIT config: OdaProcessNames must contain at least one process name.' }
     if ($cfg.WorkingDirectory -notmatch '^[A-Za-z]:\\') {
         throw "ODA-JIT config: WorkingDirectory '$($cfg.WorkingDirectory)' must be a local path on the collector (e.g. 'C:\Assessments')."
@@ -280,6 +288,23 @@ function ConvertTo-ODAJitAdminSharePath {
     else { '\\{0}\{1}$' -f $ComputerName, $Matches[1].ToUpper() }
 }
 
+# Selects the configured ODA tasks: by name and, if OdaTaskPath is set, only below that task folder.
+# This separates several ODA instances (one AOI-<WorkspaceId> folder each) on one collector.
+function Select-ODAJitTask {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)] [hashtable]$Config,
+        [Parameter(ValueFromPipeline)] [object[]]$InputObject
+    )
+    process {
+        foreach ($t in $InputObject) {
+            if ($t.TaskName -notin $Config.OdaTaskNames) { continue }
+            if ($Config.OdaTaskPath -and -not ([string]$t.TaskPath).StartsWith($Config.OdaTaskPath, [System.StringComparison]::OrdinalIgnoreCase)) { continue }
+            $t
+        }
+    }
+}
+
 # Reads task state (T1) and assessment processes (T3) from the collector via CIM/DCOM-WSMan.
 function Get-ODACollectorState {
     [CmdletBinding()]
@@ -287,7 +312,7 @@ function Get-ODACollectorState {
 
     $session = New-CimSession -ComputerName $Config.Collector -ErrorAction Stop
     try {
-        $tasks = @(Get-ScheduledTask -CimSession $session -ErrorAction Stop | Where-Object { $_.TaskName -in $Config.OdaTaskNames })
+        $tasks = @(Get-ScheduledTask -CimSession $session -ErrorAction Stop | Select-ODAJitTask -Config $Config)
         $taskObjects = foreach ($t in $tasks) {
             $info = Get-ScheduledTaskInfo -CimSession $session -TaskName $t.TaskName -TaskPath $t.TaskPath -ErrorAction Stop
             [pscustomobject]@{
@@ -460,7 +485,7 @@ Export-ModuleMember -Function @(
     'Test-ODAJitConfig', 'Import-ODAJitConfig', 'ConvertTo-ODAJitTimeOfDay',
     'Get-ODAJitNextOccurrence', 'Get-ODAJitWindowStart', 'Get-ODAJitTriggerTimes',
     'Get-ODARunState', 'Format-ODARunState',
-    'ConvertTo-ODAJitAdminSharePath', 'Get-ODACollectorState', 'Get-ODAResultFile',
+    'ConvertTo-ODAJitAdminSharePath', 'Select-ODAJitTask', 'Get-ODACollectorState', 'Get-ODAResultFile',
     'Wait-ODAJitCompletion',
     'Get-ODAJitDomainFromDN', 'Get-ODAJitMemberTtl', 'Get-ODAJitEnterpriseAdminsDN',
     'Test-ODAJitGroupMember', 'Invoke-ODAJitToggle'

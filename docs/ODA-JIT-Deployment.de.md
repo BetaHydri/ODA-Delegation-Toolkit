@@ -37,7 +37,7 @@ Rolle oben):
 | `Start-ODAJitRevokeWatcher.ps1` | EA **nach** dem Lauf entziehen | Erkennt das Ende (Task-Status, `OMSAssessment.exe`, `*.recommendations.*`), hält die Karenzzeit, klassifiziert das Ergebnis, erzwingt die Deadline; `-RevokeNow` (Notfall), `-WindowStart` | Laufzeit (Revoke) |
 | `Invoke-ODAJitDelegation.ps1` | Eigentliche EA-Änderung | Setzt bzw. entfernt die EA-Mitgliedschaft (`-Mode FullEA`, `-operation add/delete`); **nicht** direkt aufrufen | Hilfsskript |
 | `ODAJit.Common.psm1` | Gemeinsame Logik | Konfiguration laden/prüfen, Zeitfenster berechnen, Ende-Signale auswerten, Logging, Events, AD-Helfer | Bibliothek |
-| `ODAJit.example.psd1` | Konfigurationsvorlage | Alle Parameter je Forest: Konten, Collector, `OdaTaskNames`, Fenster, Timing, PAM (`UsePamTtl`) | Konfiguration |
+| `ODAJit.example.psd1` | Konfigurationsvorlage | Alle Parameter je Forest: Konten, Collector, `OdaTaskNames`, `OdaTaskPath` (optional), Fenster, Timing, PAM (`UsePamTtl`) | Konfiguration |
 
 ```mermaid
 flowchart TD
@@ -308,6 +308,7 @@ notepad 'C:\ODA-JIT\Config\ODAJit.forest-a.psd1'
 | `Collector` | **FQDN des Collector-Servers on-prem** (nicht der Name des Arc-Objekts) | `ODA-COL-A.child.forest-a.example` |
 | `WorkingDirectory` | Ordner auf dem Collector, der die `*Assessment`-Unterordner enthält | Je nach ODA-Version `C:\Assessments` oder `C:\MicrosoftAssessments\Collect`. Der Watcher liest darunter **alle** `*Assessment`-Ordner (`*.recommendations.*`) |
 | `OdaTaskNames` | Namen der ODA-Aufgaben, die Enterprise Admins brauchen | Standard `ADAssessment`, `ADSecurityAssessment`. **Nur** die AD-Assessments eintragen; Assessments ohne EA-Bedarf (z. B. `WindowsServerAssessment`) hier weglassen |
+| `OdaTaskPath` | Optional: Aufgabenordner **einer** ODA-Instanz (Präfix) | Nur nötig, wenn auf dem Collector mehrere ODA-Instanzen laufen (siehe unten). Beispiel `\Microsoft\Operations Management Suite\AOI-<WorkspaceId>\`. Leer = nur Filter über `OdaTaskNames` |
 | `WindowDay` / `WindowStart` | Wochentag (englisch) und Startzeit der **ersten** ODA-Aufgabe | muss zum Zeitplan auf dem Collector passen (Schritt 6) |
 | `GrantLeadMinutes`, `GraceMinutes`, `NoStartTimeoutMinutes`, `DeadlineHours`, `TtlHours` | Zeitsteuerung | Standard 60 / 30 / 90 / 6 / 8. Deadline ≥ 3× längste gemessene Laufzeit; TTL > Vorlauf + Deadline |
 | `UsePamTtl` | PAM-TTL verwenden | `$false`, falls PAM nicht aktiv ist (2.4) |
@@ -326,6 +327,38 @@ notepad 'C:\ODA-JIT\Config\ODAJit.forest-a.psd1'
 > Aufgabe, die mit dem EA-Fenster nichts zu tun hat. `WorkingDirectory` zeigt auf den Ordner, der
 > die `*Assessment`-Unterordner enthält – je nach Installation `C:\Assessments` oder
 > `C:\MicrosoftAssessments\Collect`.
+
+**Parallelbetrieb mit einer bestehenden ODA-Instanz (z. B. Delegations-Variante).** Jede
+ODA-Instanz (je Log-Analytics-Workspace) legt ihre Aufgaben in einen eigenen Ordner ab:
+`\Microsoft\Operations Management Suite\AOI-<WorkspaceId>\Assessments\<Assessment>\`. Beide
+Instanzen heißen gleich (`ADAssessment`, `ADSecurityAssessment`) und unterscheiden sich nur im
+Ordner. Damit die JIT-Skripte nur die **eigenen** Aufgaben starten und überwachen, wird `OdaTaskPath`
+auf den Ordner der FullEA-Instanz gesetzt:
+
+```powershell
+# Auf dem Collector: Ordner und Konto aller ODA-Aufgaben anzeigen
+Get-ScheduledTask -TaskPath '\Microsoft\Operations Management Suite\*' |
+    Select-Object TaskPath, TaskName, @{ n = 'RunAs'; e = { $_.Principal.UserId } }
+```
+
+```powershell
+# ODAJit.<forest>.psd1 – nur die Aufgaben der FullEA-Instanz
+OdaTaskPath      = '\Microsoft\Operations Management Suite\AOI-<WorkspaceId-FullEA>\'
+WorkingDirectory = 'C:\Assessments-FullEA'   # eigener Ordner je Instanz (-WorkingDirectory beim Anlegen)
+```
+
+- Für die FullEA-Instanz wird ein **eigener Workspace** und ein **eigener `-WorkingDirectory`**
+  verwendet. Dieselbe Assessment-Art (z. B. `ADAssessment`) mehrfach auf einer Maschine
+  erfordert **je Instanz eine eigene Log-Analytics-Workspace-Azure-Ressource (LAW)**, denn jede
+  LAW hat ihre eigene WorkspaceId, und daraus entsteht der Aufgabenordner `AOI-<WorkspaceId>`.
+  Die `AOI-<WorkspaceId>` entsteht, sobald der neue Workspace am Connector hinzugefügt
+  und die Aufgabe angelegt ist. Erst danach lässt sich `OdaTaskPath` eintragen.
+- Das FullEA-gMSA gehört in eine **eigene** JIT-Gruppe. Das gMSA der anderen Instanz darf dort **nicht**
+  Mitglied sein.
+- Die Läufe an **verschiedenen Wochentagen** legen. Der Prozesscheck des Watchers (`OdaProcessNames`)
+  unterscheidet die Instanzen nicht; ein gleichzeitig laufender Fremd-Lauf würde das Entziehen von EA
+  nur verzögern (die Deadline greift trotzdem).
+- Ein Pfad, der nichts trifft, meldet der Grant als `ODA task(s) not found …`.
 
 Ob die Konfiguration gültig ist, prüft man so:
 
@@ -531,6 +564,7 @@ darf, und genau das widerspricht der Forest-Trennung. **Nicht empfohlen.**
 | Fehler bei `-MemberTimeToLive` | PAM-Feature nicht aktiv | PAM aktivieren (2.4) oder `UsePamTtl = $false` |
 | Watcher: „Collector query failed“ | WinRM gesperrt oder Ausführer nicht lokaler Admin auf dem Collector-Server | `Test-WSMan`, Firewall 5985, Schritt 3 |
 | Watcher: „Result file check failed“ | Kein Zugriff auf `C$` des Collector-Servers | Firewall 445, lokaler Admin auf dem Collector-Server, `WorkingDirectory` prüfen |
+| Grant: „ODA task(s) not found“, obwohl die Aufgaben existieren | `OdaTaskPath` zeigt auf den falschen `AOI-<WorkspaceId>`-Ordner (mehrere ODA-Instanzen auf dem Collector) | Aufgaben mit `Get-ScheduledTask -TaskPath '\Microsoft\Operations Management Suite\*'` auflisten und den Ordner der richtigen Instanz übernehmen (Schritt 5) |
 | Watcher endet immer mit Deadline (Event 1012) | Zeitplan der ODA-Aufgaben passt nicht zu `WindowDay`/`WindowStart`, falsche `OdaTaskNames` | Schritt 6; Log zeigt `Missing=[…]` |
 | Watcher endet mit `Incomplete`, ein Assessment fehlt (Event 1013) | `ADAssessment` und `ADSecurityAssessment` laufen an **verschiedenen Tagen** | Beide auf denselben `WindowDay` legen (Schritt 6, Option A) oder zwei getrennte Fenster (Option B) |
 | Keine Events im Application-Log | Ereignisquelle fehlt | `Register-ODAJitTasks.ps1` als Administrator ausführen |

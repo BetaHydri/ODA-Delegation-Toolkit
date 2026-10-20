@@ -99,7 +99,7 @@ if (-not $SkipCollectorCheck) {
     try {
         $session = New-CimSession -ComputerName $cfg.Collector
         try {
-            $odaTasks = @(Get-ScheduledTask -CimSession $session | Where-Object { $_.TaskName -in $cfg.OdaTaskNames })
+            $odaTasks = @(Get-ScheduledTask -CimSession $session | Select-ODAJitTask -Config $cfg)
         }
         finally { Remove-CimSession -CimSession $session -ErrorAction SilentlyContinue }
         foreach ($name in $cfg.OdaTaskNames) {

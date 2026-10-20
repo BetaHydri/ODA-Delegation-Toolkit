@@ -597,6 +597,19 @@ offers machines from the active LAW's subscription/resource group
 ([Manage Assessments](https://learn.microsoft.com/services-hub/microsoft-engage-center/health/manage-assessments)).
 The LAW must keep public network access enabled.
 
+**Several ODA instances on one collector** (e.g. the delegation variant next to FullEA JIT): running
+the same assessment (e.g. `ADAssessment`) more than once on one machine requires a **dedicated Log
+Analytics workspace Azure resource (LAW) per instance**. Each LAW has its own WorkspaceId and ODA
+keeps the tasks of each instance in its own folder
+`\Microsoft\Operations Management Suite\AOI-<WorkspaceId>\Assessments\<Assessment>\`. Add the new
+WorkspaceId to the Engage Center Connector, create the tasks with their own `-WorkingDirectory`, then
+set the optional config key `OdaTaskPath` (`\Microsoft\Operations Management Suite\AOI-<WorkspaceId>\`)
+so that grant, watcher and `Register-ODAJitTasks.ps1` only handle the tasks of that instance. Put the
+FullEA gMSA into its own JIT group, and schedule the runs on different weekdays (the process check for
+`OMSAssessment.exe` cannot tell the instances apart). Details:
+[docs/ODA-JIT-Deployment.md](docs/ODA-JIT-Deployment.md) (step 5); disable the old task only after the
+FullEA run was accepted.
+
 ## Prerequisites
 
 - Windows OS
