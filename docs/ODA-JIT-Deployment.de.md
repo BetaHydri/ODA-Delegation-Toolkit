@@ -353,6 +353,27 @@ WorkingDirectory = 'C:\Assessments-FullEA'   # eigener Ordner je Instanz (-Worki
   LAW hat ihre eigene WorkspaceId, und daraus entsteht der Aufgabenordner `AOI-<WorkspaceId>`.
   Die `AOI-<WorkspaceId>` entsteht, sobald der neue Workspace am Connector hinzugefügt
   und die Aufgabe angelegt ist. Erst danach lässt sich `OdaTaskPath` eintragen.
+- Die Aufgaben der FullEA-Instanz legt man **auf dem Collector** in einer PowerShell als Administrator
+  an. Das gMSA muss dort installiert sein (`Test-ADServiceAccount` = `True`) und das Recht
+  „Als Stapelverarbeitungsauftrag anmelden“ haben, sonst warnt das Cmdlet (`Log on as a batch job`).
+  Die Abfrage nach `ScheduledTaskPassword` mit beliebiger Eingabe oder Enter bestätigen: Das Kennwort
+  eines gMSA verwaltet AD:
+
+  Das FullEA-gMSA braucht laut Microsoft-Voraussetzungen zusätzlich **lokale Administratorrechte auf dem
+  Collector**. Findet das Cmdlet mehrere Management Groups/Workspaces am Agent, **fragt es nach der
+  Auswahl** (Nummer eingeben): dort den **neuen** Workspace wählen. `-LogAnalyticsWorkspaceId` gibt
+  es nur in neueren ODA-Versionen und ist in den Microsoft-PDFs (2019/2021) nicht beschrieben.
+
+  ```powershell
+  $ws = '<WorkspaceId-FullEA>'   # nur bei ODA-Versionen mit diesem Parameter, sonst weglassen und im Menü wählen
+  Add-ADAssessmentTask         -WorkingDirectory 'C:\Assessments-FullEA' -ScheduledTaskUsername 'CHILDA\gMSA-ODA-FullEA$' -RunWithManagedServiceAccount $true -LogAnalyticsWorkspaceId $ws
+  Add-ADSecurityAssessmentTask -WorkingDirectory 'C:\Assessments-FullEA' -ScheduledTaskUsername 'CHILDA\gMSA-ODA-FullEA$' -RunWithManagedServiceAccount $true -LogAnalyticsWorkspaceId $ws
+  ```
+
+  Die Ausgabe nennt den erkannten Agent (`AOI-<GUID>`) und „Task Creation Successful“. Parameter je
+  ODA-Version mit `Get-Help Add-ADAssessmentTask -Parameter *` prüfen. Danach den neuen Ordner mit
+  `Get-ScheduledTask` ermitteln (siehe oben) und als `OdaTaskPath` eintragen. Die alten Aufgaben
+  bleiben unverändert.
 - Das FullEA-gMSA gehört in eine **eigene** JIT-Gruppe. Das gMSA der anderen Instanz darf dort **nicht**
   Mitglied sein.
 - Die Läufe an **verschiedenen Wochentagen** legen. Der Prozesscheck des Watchers (`OdaProcessNames`)

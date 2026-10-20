@@ -341,6 +341,26 @@ WorkingDirectory = 'C:\Assessments-FullEA'   # own folder per instance (-Working
   WorkspaceId, and the task folder `AOI-<WorkspaceId>` is derived from it. The
   `AOI-<WorkspaceId>` folder appears once the new workspace is added to the connector and the task
   is created, so `OdaTaskPath` can only be filled in afterwards.
+- Create the tasks of the FullEA instance **on the collector** in an elevated PowerShell. The gMSA must
+  be installed there (`Test-ADServiceAccount` = `True`) and hold the right "Log on as a batch job",
+  otherwise the cmdlet warns (`Log on as a batch job`). Confirm the `ScheduledTaskPassword` prompt
+  with any input or just Enter: AD manages the gMSA password:
+
+  According to Microsoft's prerequisites the FullEA gMSA also needs **local administrator rights on the
+  collector**. If the cmdlet finds several management groups/workspaces on the agent it **asks you to
+  choose** (enter the number): pick the **new** workspace. `-LogAnalyticsWorkspaceId` exists only in
+  newer ODA versions and is not described in the Microsoft PDFs (2019/2021).
+
+  ```powershell
+  $ws = '<WorkspaceId-FullEA>'   # only for ODA versions with this parameter, otherwise omit it and choose in the menu
+  Add-ADAssessmentTask         -WorkingDirectory 'C:\Assessments-FullEA' -ScheduledTaskUsername 'CHILDA\gMSA-ODA-FullEA$' -RunWithManagedServiceAccount $true -LogAnalyticsWorkspaceId $ws
+  Add-ADSecurityAssessmentTask -WorkingDirectory 'C:\Assessments-FullEA' -ScheduledTaskUsername 'CHILDA\gMSA-ODA-FullEA$' -RunWithManagedServiceAccount $true -LogAnalyticsWorkspaceId $ws
+  ```
+
+  The output names the detected agent (`AOI-<GUID>`) and "Task Creation Successful". Check the
+  parameters of your ODA version with `Get-Help Add-ADAssessmentTask -Parameter *`. Then find the new
+  folder with `Get-ScheduledTask` (see above) and enter it as `OdaTaskPath`. The old tasks stay
+  untouched.
 - Put the FullEA gMSA in its **own** JIT group. The gMSA of the other instance must **not** be a member.
 - Schedule the runs on **different weekdays**. The watcher's process check (`OdaProcessNames`) cannot
   tell the instances apart; a foreign run in progress would only delay the EA removal (the deadline

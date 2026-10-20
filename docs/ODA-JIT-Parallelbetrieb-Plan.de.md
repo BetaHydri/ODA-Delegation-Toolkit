@@ -112,7 +112,7 @@ Technisch umsetzen:
 | 1 | Tier-0-Host bereitstellen, härten, `RSAT-AD-PowerShell` installieren. Firewall: 9389 zur Root-DC und den GCs im Collector-Standort, 5985/445 zum Collector | Tier-0-Admin |
 | 2 | AD-Objekte: `svc-ODA-JIT$` (Root-Domain-Admin), **neue** Gruppe `ODA-FullEA-Accounts`, **neues** Assessment-gMSA (Collector in `PrincipalsAllowedToRetrieveManagedPassword`). Optional PAM-Feature aktivieren | Tier-0-Admin |
 | 3 | GPO nach Abschnitt 4 (Collector-OU, Security Filtering, Allow-Listen, lokale Admins) | GPO-Team |
-| 4 | Collector: neues gMSA installieren (`Test-ADServiceAccount`), zweite ODA-Instanz mit neuem Workspace und eigenem Ordner (z. B. `C:\Assessments-FullEA`), **anderer Wochentag** als die Delegations-Aufgaben, beide FullEA-Aufgaben am selben Tag. Im Engage Center den neuen Workspace verbinden | Tier-1-Admin |
+| 4 | Collector: neues gMSA installieren (`Test-ADServiceAccount`), **lokaler Admin** und „Log on as a batch job“ für das gMSA vergeben. Zweite ODA-Instanz mit `Add-ADAssessmentTask` und `Add-ADSecurityAssessmentTask` (neuer Workspace in der Auswahl, eigener `-WorkingDirectory`, z. B. `C:\Assessments-FullEA`), **anderer Wochentag** als die Delegations-Aufgaben, beide FullEA-Aufgaben am selben Tag. Im Engage Center den neuen Workspace verbinden | Tier-1-Admin |
 | 5 | Skripte (`OdaTaskPath` ist umgesetzt): die sechs Dateien nach `C:\ODA-JIT` auf den Tier-0-Host kopieren, `ODAJit.<forest>.psd1` mit dem **neuen** `AOI-<GUID>`-Ordner als `OdaTaskPath` anlegen | Wir |
 | 6 | Probelauf (Guide Schritt 7, ohne Änderungen), dann `Register-ODAJitTasks.ps1` | Wir |
 | 7 | Erster echter Lauf mit `-StartOdaTasks`. Events 1000 bis 1010 prüfen. Die alte Aufgabe läuft an ihrem Tag unverändert weiter | Wir |
