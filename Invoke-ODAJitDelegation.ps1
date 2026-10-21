@@ -65,7 +65,8 @@
 
 .PARAMETER groupDN
     The distinguished name of the same group. Used for the cross-domain Backup Operators
-    membership write (Set-ADObject / Add-ADGroupMember with -Server to avoid referral errors).
+    membership write (Set-ADObject with -Server on the group's DN - Add-ADGroupMember fails with
+    "A referral was returned from the server" for members of another domain).
 
 .PARAMETER backupOperatorsDomains
     Array of domain FQDNs whose built-in Backup Operators group the group is added to / removed
@@ -178,11 +179,12 @@ function Write-Log ([string]$message, [string]$level = 'INFO') {
 }
 
 Write-Host "Operation: $operation" -ForegroundColor Cyan
-Write-Host "Account:   $account" -ForegroundColor Cyan
+$accountLabel = if ($Mode -eq 'FullEA') { "Group: $groupDN" } else { "Account: $account" }
+Write-Host $accountLabel -ForegroundColor Cyan
 Write-Host "Logging to: $logPath" -ForegroundColor Cyan
 Write-Host ''
 
-Write-Log "=== Starting Invoke-ODAJitDelegation | Mode: $Mode | Operation: $operation | Account: $account ==="
+Write-Log "=== Starting Invoke-ODAJitDelegation | Mode: $Mode | Operation: $operation | $accountLabel ==="
 
 Import-Module ActiveDirectory -ErrorAction Stop
 
@@ -191,10 +193,6 @@ $script:failureCount = 0
 # Well-known SIDs keep the group lookup locale-independent (e.g. 'Organisations-Admins' /
 # 'Sicherungs-Operatoren' in German forests).
 $backupOperatorsSid = 'S-1-5-32-551'
-
-function Get-DomainFromDN ([string]$dn) {
-    (@([regex]::Matches($dn, '(?i)(?:^|,)DC=([^,]+)') | ForEach-Object { $_.Groups[1].Value })) -join '.'
-}
 
 # Returns $null if absent, 0 for a standing membership, else the remaining PAM TTL in seconds.
 # -ShowMemberTimeToLive is only requested with PAM: the LDAP control needs FFL 2016+ DCs.
@@ -210,14 +208,19 @@ function Get-MemberTtl ([string]$groupIdentity, [string]$server, [string]$member
 }
 
 # Add/remove a group membership on a single target server (a DC that owns the group).
-# The member object is resolved in its OWN domain and passed as an object, so cross-domain
-# adds (child-domain group -> forest-root group) do not fail with referral/identity errors.
+# The member is written with Set-ADObject on the group's DN: Add-/Remove-ADGroupMember resolve the
+# member through the target server and fail with "A referral was returned from the server" when the
+# member lives in another domain (e.g. child-domain group -> forest-root Enterprise Admins).
+# Set-ADObject sends the member DN as-is (PAM TTL via the '<TTL=seconds>,<DN>' dynamic-link syntax).
 # Every change is verified by reading the membership back; failures set the exit code.
 function Set-JitGroupMembership {
     param ([string]$op, [string]$groupIdentity, [string]$groupLabel, [string]$memberDN,
         [string]$server, [int]$ttl, [bool]$pam)
 
+    $step = 'resolve group DN'
     try {
+        $groupDN = (Get-ADGroup -Identity $groupIdentity -Server $server -ErrorAction Stop).DistinguishedName
+        $step = 'read current membership'
         $before = Get-MemberTtl -groupIdentity $groupIdentity -server $server -memberDN $memberDN
 
         if ($op -eq 'add') {
@@ -226,18 +229,21 @@ function Set-JitGroupMembership {
                 Write-Log "  $groupLabel [$server] - already a member ($kind); nothing to do" 'WARN'
                 return
             }
-            $memberObj = Get-ADObject -Identity $memberDN -Server (Get-DomainFromDN $memberDN) -ErrorAction Stop
             if ($pam) {
                 # An existing TTL link cannot be extended in place - remove and re-add with the full TTL
                 if ($null -ne $before) {
-                    Remove-ADGroupMember -Identity $groupIdentity -Members $memberObj -Server $server -Confirm:$false -ErrorAction Stop
+                    $step = "Set-ADObject -Remove member=$memberDN on $groupDN"
+                    Set-ADObject -Identity $groupDN -Remove @{ member = $memberDN } -Server $server -ErrorAction Stop
                 }
-                Add-ADGroupMember -Identity $groupIdentity -Members $memberObj -Server $server `
-                    -MemberTimeToLive (New-TimeSpan -Hours $ttl) -ErrorAction Stop
+                $link = '<TTL={0}>,{1}' -f [int](New-TimeSpan -Hours $ttl).TotalSeconds, $memberDN
+                $step = "Set-ADObject -Add member=$link on $groupDN"
+                Set-ADObject -Identity $groupDN -Add @{ member = $link } -Server $server -ErrorAction Stop
             }
             else {
-                Add-ADGroupMember -Identity $groupIdentity -Members $memberObj -Server $server -ErrorAction Stop
+                $step = "Set-ADObject -Add member=$memberDN on $groupDN"
+                Set-ADObject -Identity $groupDN -Add @{ member = $memberDN } -Server $server -ErrorAction Stop
             }
+            $step = 'read back membership'
             $after = Get-MemberTtl -groupIdentity $groupIdentity -server $server -memberDN $memberDN
             if ($null -eq $after) { throw 'membership not found after add' }
             if ($pam) { Write-Log "  $groupLabel [$server] - added with TTL ${ttl}h (remaining ${after}s)" 'OK' }
@@ -248,8 +254,9 @@ function Set-JitGroupMembership {
                 Write-Log "  $groupLabel [$server] - not a member; nothing to remove" 'OK'
                 return
             }
-            $memberObj = Get-ADObject -Identity $memberDN -Server (Get-DomainFromDN $memberDN) -ErrorAction Stop
-            Remove-ADGroupMember -Identity $groupIdentity -Members $memberObj -Server $server -Confirm:$false -ErrorAction Stop
+            $step = "Set-ADObject -Remove member=$memberDN on $groupDN"
+            Set-ADObject -Identity $groupDN -Remove @{ member = $memberDN } -Server $server -ErrorAction Stop
+            $step = 'read back membership'
             $after = Get-MemberTtl -groupIdentity $groupIdentity -server $server -memberDN $memberDN
             if ($null -ne $after) { throw 'membership still present after remove' }
             Write-Log "  $groupLabel [$server] - removed (verified)" 'OK'
@@ -257,7 +264,7 @@ function Set-JitGroupMembership {
     }
     catch {
         $script:failureCount++
-        Write-Log "  $groupLabel [$server] - $op FAILED: $($_.Exception.Message)" 'ERR'
+        Write-Log "  $groupLabel [$server] - $op FAILED at step '$step': $($_.Exception.Message) [$($_.Exception.GetType().Name)]" 'ERR'
     }
 }
 
