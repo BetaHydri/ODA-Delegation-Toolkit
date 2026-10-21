@@ -64,19 +64,19 @@
 
 .EXAMPLE
     # Preview only: reads the sources, shows what would be written
-    .\New-ODAJitDataCollectionRules.ps1 -SubscriptionId <subscription-id> `
+    .\Copy-ODAJitDataCollectionRules.ps1 -SubscriptionId <subscription-id> `
         -ResourceGroup RG-ODA -ArcMachineName ODA-COL-A `
         -TargetWorkspaceName LAW-ODA-B -WorkingDirectory C:\Assessments-FullEA -WhatIf
 
 .EXAMPLE
     # Create (idempotent: re-running updates the same resources)
-    .\New-ODAJitDataCollectionRules.ps1 -SubscriptionId <subscription-id> `
+    .\Copy-ODAJitDataCollectionRules.ps1 -SubscriptionId <subscription-id> `
         -ResourceGroup RG-ODA -ArcMachineName ODA-COL-A `
         -TargetWorkspaceName LAW-ODA-B -WorkingDirectory C:\Assessments-FullEA
 
 .EXAMPLE
     # Remove what was created
-    .\New-ODAJitDataCollectionRules.ps1 -SubscriptionId <subscription-id> `
+    .\Copy-ODAJitDataCollectionRules.ps1 -SubscriptionId <subscription-id> `
         -ResourceGroup RG-ODA -ArcMachineName ODA-COL-A `
         -TargetWorkspaceName LAW-ODA-B -WorkingDirectory C:\Assessments-FullEA -Remove
 

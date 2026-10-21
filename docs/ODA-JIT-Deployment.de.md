@@ -637,15 +637,15 @@ Der Engage Center Connector ist nur eine Oberfläche darüber.
 Ohne die beiden [B]-DCRs beobachtet nichts <B>: Die Dateien werden
 geschrieben, aber nie eingesammelt, und LAW B bleibt leer.
 [A]-DCRs stammen aus dem ODA-Enrollment,
-[B]-DCRs aus Azure\New-ODAJitDataCollectionRules.ps1.
+[B]-DCRs aus Azure\Copy-ODAJitDataCollectionRules.ps1.
 ```
 
-Das Hilfsskript [`Azure/New-ODAJitDataCollectionRules.ps1`](../Azure/New-ODAJitDataCollectionRules.ps1)
+Das Hilfsskript [`Azure/Copy-ODAJitDataCollectionRules.ps1`](../Azure/Copy-ODAJitDataCollectionRules.ps1)
 klont die vorhandenen DCRs und ändert nur Dateimuster und Ziel-Workspace:
 
 ```powershell
 # Vorschau (nur lesend), danach ohne -WhatIf ausführen
-.\Azure\New-ODAJitDataCollectionRules.ps1 -SubscriptionId <id> -ResourceGroup <rg> `
+.\Azure\Copy-ODAJitDataCollectionRules.ps1 -SubscriptionId <id> -ResourceGroup <rg> `
     -ArcMachineName ODA-COL-A -TargetWorkspaceName <neue-LAW> -WorkingDirectory C:\Assessments-FullEA -WhatIf
 ```
 
