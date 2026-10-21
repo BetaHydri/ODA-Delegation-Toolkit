@@ -475,7 +475,17 @@ function Invoke-ODAJitToggle {
     & $script -operation $Operation -Mode FullEA -forestRootServer $Config.ForestRootServer `
         -groupDN $Config.AccountGroupDN -ttlHours $Config.TtlHours -usePamTtl ([bool]$Config.UsePamTtl) `
         -logPath $log | Out-Null
-    [int]$global:LASTEXITCODE
+    $rc = [int]$global:LASTEXITCODE
+    if ($rc -ne 0) {
+        # The actual AD error is only in the delegation script's own log - surface it in the caller's log
+        Write-ODAJitLog "Invoke-ODAJitDelegation.ps1 ($Operation) failed - details in $log" 'ERR'
+        if (Test-Path -LiteralPath $log) {
+            foreach ($line in @(Select-String -LiteralPath $log -Pattern '\[ERR\]' | Select-Object -Last 5)) {
+                Write-ODAJitLog ('  ' + ($line.Line -replace '^\[[^\]]+\] \[ERR\] ', '')) 'ERR'
+            }
+        }
+    }
+    $rc
 }
 
 #endregion
