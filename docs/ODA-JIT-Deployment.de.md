@@ -115,6 +115,99 @@ flowchart LR
 > aufheben. Jeder Forest bekommt deshalb seinen eigenen Tier-0-Host, seinen eigenen Ausführer
 > und seine eigene Konfigurationsdatei.
 
+### Datenfluss: von den Ergebnisdateien in den Log-Analytics-Workspace
+
+Die JIT-Skripte steuern nur, **wann** das Assessment mit Enterprise Admins laufen darf. Die Ergebnisse
+nach Azure bringt der Azure Monitor Agent auf dem Collector. Keine Data Collection Rule (DCR) startet ein
+Assessment, und es gibt kein „jetzt einsammeln“: Der Agent beobachtet die Dateien laufend.
+
+```text
+COLLECTOR (Arc-fähiger Memberserver)
++--------------------------------------------------------------------------+
+| [1] ODA-Aufgabe (Assessment-gMSA, Enterprise Admin im JIT-Fenster)       |
+|     OMSAssessment.exe liest das AD und schreibt die Ergebnisdateien:     |
+|       <WorkingDirectory>\ADAssessment\*.assessmentadrecs                 |
+|       <WorkingDirectory>\ADSecurityAssessment\*.assessmentadsecurityrecs |
+|                                                                          |
+|                          | neue Zeilen werden an die Dateien angehängt   |
+|                          v                                               |
+| [3] Azure Monitor Agent (AMA, Arc-Erweiterung)                           |
+|     liest jede Datei, die zum Dateimuster einer zugeordneten DCR passt   |
++--------------------------------------------------------------------------+
+           ^                                   |
+           | [2] Konfiguration:                | [4] Rohzeilen, Stream
+           |     welche DCRs gelten?           |     Custom-ODAStream
+           |     (vom Agent abgerufen)         |     (HTTPS 443, ausgehend)
+           |                                   v
+AZURE
++--------------------------------------------------------------------------+
+| Data Collection Endpoint (DCE)   <- derselbe Endpoint für alle DCRs      |
+|   config:  ...handler.control.monitor.azure.com                          |
+|   ingest:  ...ingest.monitor.azure.com                                   |
+|                          |                                               |
+|                          v                                               |
+| [5] Data Collection Rule (DCR) - eine je Assessment-Art und Instanz      |
+|     transformKql zerlegt jede tabulatorgetrennte Zeile in Spalten        |
+|                          |                                               |
+|                          v                                               |
+| [6] Log-Analytics-Workspace                                              |
+|     ADAssessmentRecommendation / ADSecurityAssessmentRecommendation      |
+|                          |                                               |
+|                          v                                               |
+| Workbooks und der Engage Center Connector lesen aus dem Workspace        |
++--------------------------------------------------------------------------+
+```
+
+| Schritt | Was passiert | Gesteuert durch |
+| ------- | ------------ | --------------- |
+| 1 | Die ODA-Aufgabe läuft und schreibt Ergebnisdateien in ihr Arbeitsverzeichnis | Zeitplan der Aufgabe oder `Start-ODAJitGrant.ps1 -StartOdaTasks` |
+| 2 | Der Agent holt, welche DCRs der Maschine zugeordnet sind | Zuordnungen der Arc-Maschine |
+| 3 | Der Agent liest neue Zeilen jeder Datei, die zu einem Dateimuster einer DCR passt. Ein Datensatz beginnt mit einem ISO-8601-Zeitstempel | Dateimuster in der DCR (`filePatterns`) |
+| 4 | Die Rohzeilen gehen an den Endpoint, adressiert an die DCR | Stream `Custom-ODAStream`, DCE |
+| 5 | Die DCR-Transformation macht aus jeder Zeile Spalten der integrierten Tabelle | `transformKql`, `outputStream` der DCR |
+| 6 | Die Zeilen landen im Ziel-Workspace | `destinations` der DCR |
+
+**Welche Azure-Ressourcen aufeinander verweisen.** Die Erfassung funktioniert nur, wenn die ganze Kette
+steht: Die Maschine ist einer DCR zugeordnet, die DCR nennt das zu beobachtende Verzeichnis, den zu
+nutzenden Endpoint und den Ziel-Workspace.
+
+```text
+          +----------------------------------------+
+          | Arc-Maschine (HybridCompute/machines)  |
+          | + Azure-Monitor-Agent-Erweiterung      |
+          +----------------------------------------+
+                              |
+                              |  Zuordnung (DCRA): 1 Maschine : n DCRs
+                              v
++------------------------------------------------------------------------+
+| Data Collection Rule (DCR)   je Assessment-Art und ODA-Instanz eine    |
+|                                                                        |
+|   dataSources.logFiles.filePatterns WAS     Verzeichnis/Dateien        |
+|   streamDeclarations                IN      Custom-ODAStream (RawData) |
+|   dataFlows.transformKql            WIE     Rohzeile -> Spalten        |
+|   dataFlows.outputStream            ZIEL    Zieltabelle (integriert)   |
+|   destinations.logAnalytics         WOHIN   Ziel-Workspace             |
+|   dataCollectionEndpointId          ÜBER    Endpoint für die Daten     |
++------------------------------------------------------------------------+
+                |                                       |
+                | n : 1 DCE                             | n : 1 Workspace
+                v                                       v
++--------------------------------+      +--------------------------------+
+| Data Collection Endpoint (DCE) |      | Log-Analytics-Workspace (LAW)  |
+| z. B. oda-dce                  |      | einer je ODA-Instanz           |
+| von allen DCRs gemeinsam       |      | integrierte ODA-Tabellen       |
++--------------------------------+      +--------------------------------+
+```
+
+- **Nur neue Daten bewegen die Pipeline.** Nach bisherigem Kenntnisstand liest der Agent eine Datei nur dann
+  von Anfang an, wenn sie erst nach dem Wirksamwerden der DCR entsteht; bei bereits vorhandenen Dateien liest
+  er nur danach geschriebene Zeilen. Ein Lauf, der vor der DCR fertig war, wird daher nicht erfasst – das
+  Assessment erneut laufen lassen. Zwischen geschriebener Datei und den ersten Zeilen im Workspace sind
+  ungefähr 5–15 Minuten zu erwarten (hier nicht gemessen).
+- **Wo es hakt:** Dateien nicht geschrieben (Aufgabe lief nicht), Dateimuster passt nicht zum
+  Arbeitsverzeichnis, der Agent hat keine DCR für dieses Verzeichnis, Transformation ungültig. Zu den
+  zusätzlichen DCRs für eine zweite Instanz siehe Schritt 5.
+
 ### Namen im Überblick
 
 | Art | Name |
@@ -509,8 +602,45 @@ Collector (eigene Arc-Maschine) hat; diese Maschine bekommt dann ihre eigenen DC
 
 Zuerst prüfen (Azure-Portal → Monitor → Data Collection Rules bzw. Arc-Maschine → Data collection
 rules): Gibt es schon eine DCR, deren Dateimuster zum neuen Arbeitsverzeichnis passt und deren Ziel der
-neue Workspace ist? Wenn nicht, zwei zusätzliche DCRs anlegen und derselben Arc-Maschine zuordnen. Das
-Hilfsskript [`Azure/New-ODAJitDataCollectionRules.ps1`](../Azure/New-ODAJitDataCollectionRules.ps1)
+neue Workspace ist? Wenn nicht, zwei zusätzliche DCRs anlegen und derselben Arc-Maschine zuordnen. So
+sieht das Ergebnis aus:
+
+```text
+Arc-Maschine ODA-COL-A  -  EIN Azure Monitor Agent + ODA-Erweiterungen
+|                        [A] Delegations-Instanz, <A> = C:\Assessments
+|
++-- association --> ad-dcr-rule                         [A]
+|     liest    <A>\ADAssessment\*.assessmentadrecs
+|     schreibt ADAssessmentRecommendation in LAW A
+|
++-- association --> adsecurity-dcr-rule                 [A]
+|     liest    <A>\ADSecurityAssessment\*.assessmentadsecurityrecs
+|     schreibt ADSecurityAssessmentRecommendation in LAW A
+|
++-- association --> ad-jit-dcr-rule                     [B]
+|     liest    <B>\ADAssessment\*.assessmentadrecs
+|     schreibt ADAssessmentRecommendation in LAW B
+|
++-- association --> adsecurity-jit-dcr-rule             [B]
+|     liest    <B>\ADSecurityAssessment\*.assessmentadsecurityrecs
+|     schreibt ADSecurityAssessmentRecommendation in LAW B
+|
+'-- association --> windowsserver-dcr-rule              [Server]
+      liest    <A>\WindowsServerAssessment\*   (unverändert)
+
+[A], [B] = die beiden ODA-Instanzen; <B> = Arbeitsverzeichnis der zweiten
+Alle fünf DCRs verweisen auf DENSELBEN DCE (1 DCE : n DCRs).
+LAW A erhält 2 DCRs, LAW B 2 DCRs, die Windows-Server-DCR ihren eigenen LAW.
+Maschine, DCE und DCRs können in verschiedenen Ressourcengruppen liegen.
+Der Engage Center Connector ist nur eine Oberfläche darüber.
+
+Ohne die beiden [B]-DCRs beobachtet nichts <B>: Die Dateien werden
+geschrieben, aber nie eingesammelt, und LAW B bleibt leer.
+[A]-DCRs stammen aus dem ODA-Enrollment,
+[B]-DCRs aus Azure\New-ODAJitDataCollectionRules.ps1.
+```
+
+Das Hilfsskript [`Azure/New-ODAJitDataCollectionRules.ps1`](../Azure/New-ODAJitDataCollectionRules.ps1)
 klont die vorhandenen DCRs und ändert nur Dateimuster und Ziel-Workspace:
 
 ```powershell

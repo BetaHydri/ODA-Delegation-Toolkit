@@ -10,7 +10,7 @@
       The ODA enrollment creates one DCR per assessment type (ad-dcr-rule, adsecurity-dcr-rule)
       for the Arc machine. Each DCR has a fixed file pattern (e.g. c:\Assessments\ADAssessment\
       *.assessmentadrecs) and ONE destination workspace. A second ODA instance that writes to
-      another working directory (e.g. C:\Assessments-JIT) and reports to another workspace is
+      another working directory (e.g. C:\Assessments-FullEA) and reports to another workspace is
       therefore not collected: no DCR watches its directory.
 
     What this script does (same steps that were done manually in the customer subscription)
@@ -54,7 +54,7 @@
 
 .PARAMETER WorkingDirectory
     Working directory of the second ODA instance on the collector (as used for
-    Add-ADAssessmentTask -WorkingDirectory), e.g. C:\Assessments-JIT.
+    Add-ADAssessmentTask -WorkingDirectory), e.g. C:\Assessments-FullEA.
 
 .PARAMETER NameSuffix
     Inserted into the new names: ad-dcr-rule -> ad-<suffix>-dcr-rule. Default 'jit'.
@@ -64,21 +64,21 @@
 
 .EXAMPLE
     # Preview only: reads the sources, shows what would be written
-    .\New-ODAJitDataCollectionRules.ps1 -SubscriptionId 00000000-0000-0000-0000-000000000000 `
-        -ResourceGroup RG-Assessments -ArcMachineName ODA-COL-A `
-        -TargetWorkspaceName AD-Assessment-JIT -WorkingDirectory C:\Assessments-JIT -WhatIf
+    .\New-ODAJitDataCollectionRules.ps1 -SubscriptionId <subscription-id> `
+        -ResourceGroup RG-ODA -ArcMachineName ODA-COL-A `
+        -TargetWorkspaceName LAW-ODA-B -WorkingDirectory C:\Assessments-FullEA -WhatIf
 
 .EXAMPLE
     # Create (idempotent: re-running updates the same resources)
-    .\New-ODAJitDataCollectionRules.ps1 -SubscriptionId 00000000-0000-0000-0000-000000000000 `
-        -ResourceGroup RG-Assessments -ArcMachineName ODA-COL-A `
-        -TargetWorkspaceName AD-Assessment-JIT -WorkingDirectory C:\Assessments-JIT
+    .\New-ODAJitDataCollectionRules.ps1 -SubscriptionId <subscription-id> `
+        -ResourceGroup RG-ODA -ArcMachineName ODA-COL-A `
+        -TargetWorkspaceName LAW-ODA-B -WorkingDirectory C:\Assessments-FullEA
 
 .EXAMPLE
     # Remove what was created
-    .\New-ODAJitDataCollectionRules.ps1 -SubscriptionId 00000000-0000-0000-0000-000000000000 `
-        -ResourceGroup RG-Assessments -ArcMachineName ODA-COL-A `
-        -TargetWorkspaceName AD-Assessment-JIT -WorkingDirectory C:\Assessments-JIT -Remove
+    .\New-ODAJitDataCollectionRules.ps1 -SubscriptionId <subscription-id> `
+        -ResourceGroup RG-ODA -ArcMachineName ODA-COL-A `
+        -TargetWorkspaceName LAW-ODA-B -WorkingDirectory C:\Assessments-FullEA -Remove
 
 .NOTES
     Needed only when ONE Arc machine runs several ODA instances (different working directory and
