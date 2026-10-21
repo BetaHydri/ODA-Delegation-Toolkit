@@ -15,6 +15,9 @@
     # --- Collector / ODA ------------------------------------------------------------------
     Collector          = 'ODA-COL-CONTOSO.child1.contoso.com'   # FQDN of the on-prem server (not the Azure Arc resource name)
     WorkingDirectory   = 'C:\Assessments'                  # folder with the *Assessment subfolders (ODA-version dependent, e.g. C:\MicrosoftAssessments\Collect)
+    # Prerequisite: the ODA tasks (OdaTaskNames) must already exist on the collector - ODA-JIT only starts
+    # and watches them. New FullEA instance: create them first with Add-ADAssessmentTask /
+    # Add-ADSecurityAssessmentTask (see docs\ODA-JIT-Deployment.md, step 5), then fill in OdaTaskPath.
     OdaTaskNames       = @('ADAssessment', 'ADSecurityAssessment')  # only assessments needing Enterprise Admins (NOT WindowsServerAssessment)
     # Optional: restrict to ONE ODA instance (workspace) when several run on the collector, e.g. the old
     # delegation tasks next to the FullEA tasks. Folder prefix of the tasks (see Get-ScheduledTask).

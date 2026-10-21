@@ -332,6 +332,25 @@ icacls 'C:\ODA-JIT\Logs' /grant 'FORESTA\svc-ODA-JIT$:(OI)(CI)M'
 
 ### Step 5 – Create the configuration
 
+> **Prerequisite: the ODA assessment tasks must already exist on the collector.** ODA-JIT does **not**
+> create them – it only starts and watches them. `OdaTaskNames`, `OdaTaskPath` (the
+> `AOI-<WorkspaceId>` folder only appears after the task has been created) and `WindowStart` (step 6)
+> refer to existing tasks, and steps 6–9 (schedule, trial run, `Register-ODAJitTasks.ps1`, grant) fail
+> or warn without them (`ODA task(s) not found …`).
+>
+> - **Tasks already exist** (existing ODA/delegation instance): nothing to create. Only read the
+>   values for the config.
+> - **New FullEA instance** (own gMSA, workspace, `WorkingDirectory`): first create the tasks on the
+>   collector with `Add-ADAssessmentTask` / `Add-ADSecurityAssessmentTask` – see
+>   *Running next to an existing ODA instance* below – then fill in the config.
+>
+> Check on the collector (elevated) that both tasks exist and which account/folder they use:
+>
+> ```powershell
+> Get-ScheduledTask -TaskName ADAssessment, ADSecurityAssessment |
+>     Select-Object TaskPath, TaskName, State, @{ n = 'RunAs'; e = { $_.Principal.UserId } }
+> ```
+
 ```powershell
 Copy-Item 'C:\ODA-JIT\ODAJit.example.psd1' 'C:\ODA-JIT\Config\ODAJit.forest-a.psd1'
 notepad 'C:\ODA-JIT\Config\ODAJit.forest-a.psd1'
