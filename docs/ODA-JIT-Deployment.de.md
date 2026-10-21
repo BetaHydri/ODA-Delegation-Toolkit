@@ -494,11 +494,11 @@ Im Beispiel startet AD sonntags um 02:00 und AD Security sonntags um 02:30.
   kein Kennwort nötig). Zum **Ansehen** (Microsoft → Operations Management Suite → AOI-… →
   Assessments → `ADAssessment` bzw. `ADSecurityAssessment`) und für **Ausführen** ist die Oberfläche
   unbedenklich.
-- Danach prüfen:
+- Danach prüfen (bei mehreren ODA-Instanzen auf dem Collector `-TaskPath` ergänzen – siehe unten):
 
 ```powershell
 Get-ScheduledTask -TaskName ADAssessment, ADSecurityAssessment |
-    Select-Object TaskName, @{ n = 'Start'; e = { $_.Triggers.StartBoundary } }
+    Select-Object TaskPath, TaskName, @{ n = 'Start'; e = { $_.Triggers.StartBoundary } }
 ```
 
 `Register-ODAJitTasks.ps1` vergleicht die Trigger in Schritt 8 automatisch mit der Konfiguration
@@ -514,8 +514,12 @@ Assessment am anderen Tag läuft **ohne** EA, also mit unvollständigen Ergebnis
 `WindowDay`/`WindowStart` (z. B. Sonntag 02:00 und 02:30):
 
 ```powershell
-Set-ScheduledTask -TaskName ADAssessment         -Trigger (New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At 02:00)
-Set-ScheduledTask -TaskName ADSecurityAssessment -Trigger (New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At 02:30)
+$instance = '\Microsoft\Operations Management Suite\AOI-<WorkspaceId-FullEA>\'   # = OdaTaskPath der Konfiguration
+# -TaskPath ist Pflicht; aus der gefundenen Aufgabe übernehmen (Details unter „Startzeit oder Wochentag ändern“ unten)
+$t = Get-ScheduledTask -TaskPath "$instance*" -TaskName ADAssessment
+Set-ScheduledTask -TaskName $t.TaskName -TaskPath $t.TaskPath -Trigger (New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At 02:00)
+$t = Get-ScheduledTask -TaskPath "$instance*" -TaskName ADSecurityAssessment
+Set-ScheduledTask -TaskName $t.TaskName -TaskPath $t.TaskPath -Trigger (New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At 02:30)
 ```
 
 **Option B (getrennte Tage beibehalten): zwei JIT-Fenster.** Pro Tag ein eigenes
@@ -539,33 +543,44 @@ verwaltete Kennwort selbst). Beispiel: AD Security auf **Dienstag 07:00** (passe
 am Dienstag):
 
 ```powershell
-# 1) Principal prüfen (UserId = DOMAIN\ODA-SVC$, LogonType = Password)
-(Get-ScheduledTask -TaskName ADSecurityAssessment).Principal
+# 0) Aufgaben DIESER ODA-Instanz auswählen. Die Tasknamen sind in jeder Instanz gleich, nur der Ordner
+#    unterscheidet sich -> ohne Ordnerfilter wird ggf. die Aufgabe der falschen Instanz gewählt (und geändert).
+$instance = '\Microsoft\Operations Management Suite\AOI-<WorkspaceId-FullEA>\'   # = OdaTaskPath der Konfiguration
+$tasks = @(Get-ScheduledTask -TaskPath "$instance*" -TaskName ADAssessment, ADSecurityAssessment)
+$tasks | Select-Object TaskPath, TaskName   # muss genau 2 Aufgaben zeigen, z. B. ...\AOI-…\Assessments\ADAssessment\
 
-# 2) TaskPath ermitteln – ODA-Aufgaben liegen in einem Unterordner, daher Pflicht
-$tp = (Get-ScheduledTask -TaskName ADSecurityAssessment).TaskPath   # z. B. \Microsoft\Operations Management Suite\AOI-…\Assessments\
-Export-ScheduledTask -TaskName ADSecurityAssessment -TaskPath $tp | Set-Content C:\Temp\ADSecurityAssessment.task.xml   # Sicherung der Ausgangslage
+# 1) Principal prüfen (UserId = DOMAIN\ODA-SVC$, LogonType = Password)
+$tasks | Select-Object TaskName, @{ n = 'RunAs'; e = { $_.Principal.UserId } }, @{ n = 'Logon'; e = { $_.Principal.LogonType } }
+
+# 2) Aufgabe wählen und DEREN TaskPath verwenden (jede ODA-Aufgabe liegt in einem eigenen Unterordner)
+$t = $tasks | Where-Object TaskName -eq 'ADSecurityAssessment'
+Export-ScheduledTask -TaskName $t.TaskName -TaskPath $t.TaskPath | Set-Content C:\Temp\ADSecurityAssessment.task.xml   # Sicherung der Ausgangslage
 
 # 3) Nur den Trigger ändern – gMSA bleibt unangetastet, kein Passwort nötig
 $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Tuesday -At ([datetime]'07:00')
-Set-ScheduledTask -TaskName ADSecurityAssessment -TaskPath $tp -Trigger $trigger
+Set-ScheduledTask -TaskName $t.TaskName -TaskPath $t.TaskPath -Trigger $trigger
 
 # 3b) Nur falls Set-ScheduledTask nach dem Principal fragt: gMSA explizit (weiterhin ohne Passwort)
 $principal = New-ScheduledTaskPrincipal -UserId 'DOMAIN\ODA-SVC$' -LogonType Password -RunLevel Highest
-Set-ScheduledTask -TaskName ADSecurityAssessment -TaskPath $tp -Trigger $trigger -Principal $principal
+Set-ScheduledTask -TaskName $t.TaskName -TaskPath $t.TaskPath -Trigger $trigger -Principal $principal
 
 # 4) Prüfen – beide auf Dienstag, RunAs = gMSA
-Get-ScheduledTask -TaskName ADAssessment, ADSecurityAssessment |
-    Select-Object TaskName,
+Get-ScheduledTask -TaskPath "$instance*" -TaskName ADAssessment, ADSecurityAssessment |
+    Select-Object TaskPath, TaskName,
         @{ n = 'Start'; e = { $_.Triggers.StartBoundary } },
         @{ n = 'RunAs'; e = { $_.Principal.UserId } }
 ```
 
-- **`-TaskPath` ist für die ODA-Aufgaben praktisch immer erforderlich.** Sie liegen unter
-  `\Microsoft\Operations Management Suite\…\Assessments\`. `Set-ScheduledTask` sucht ohne `-TaskPath`
-  nur im Stammordner `\` und bricht mit `0x80070002` / `ObjectNotFound` ab, obwohl
-  `Get-ScheduledTask -TaskName` die Aufgabe (ordnerübergreifend) findet. Alternativ das Task-Objekt
-  ändern und zurückpipen: `$t = Get-ScheduledTask -TaskName ADSecurityAssessment; $t.Triggers = @($trigger); $t | Set-ScheduledTask`.
+- **`-TaskPath` ist für die ODA-Aufgaben immer erforderlich – bei `Set-ScheduledTask` und, wenn mehrere
+  Instanzen laufen, auch bei `Get-ScheduledTask`.** Die Aufgaben liegen unter
+  `\Microsoft\Operations Management Suite\AOI-<WorkspaceId>\Assessments\<Assessment>\`.
+  `Set-ScheduledTask` sucht ohne `-TaskPath` nur im Stammordner `\` und bricht mit `0x80070002` /
+  `ObjectNotFound` ab, obwohl `Get-ScheduledTask -TaskName` die Aufgabe (ordnerübergreifend) findet. Bei
+  **mehreren ODA-Instanzen parallel** (gleiche Tasknamen) liefert `Get-ScheduledTask -TaskName` die
+  Aufgaben **aller** Instanzen – daher nach dem Instanzordner filtern (`-TaskPath "$instance*"`,
+  Platzhalter sind bei `Get-ScheduledTask` erlaubt) und den exakten `TaskPath` der gefundenen Aufgabe an
+  `Set-ScheduledTask` übergeben (dort keine Platzhalter). Alternativ das Task-Objekt ändern und
+  zurückpipen: `$t.Triggers = @($trigger); $t | Set-ScheduledTask`.
 - `-LogonType Password` ist für gMSA korrekt (kein Klartext-Kennwort, anders als bei einem normalen
   Konto). `-RunLevel Highest` nur, wenn die Aufgabe bisher mit höchsten Rechten läuft (Schritt 1).
 - Danach die JIT-Konfiguration anpassen (`WindowDay`, `WindowStart` = Start der **ersten** Aufgabe,
