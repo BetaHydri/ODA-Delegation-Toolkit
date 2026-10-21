@@ -474,6 +474,44 @@ WorkingDirectory = 'C:\Assessments-FullEA'   # own folder per instance (-Working
   still applies).
 - A path that matches nothing is reported by the grant as `ODA task(s) not found …`.
 
+**Azure side: extra data collection rules (only for this constellation).** The ODA enrollment
+creates, per assessment type, one Azure Monitor **data collection rule (DCR)** for the Arc machine
+(`ad-dcr-rule`, `adsecurity-dcr-rule`). Each DCR has a **fixed file pattern** – the working directory
+of the instance, e.g. `c:\Assessments\ADAssessment\*.assessmentadrecs` – and **one** destination
+workspace. If a **second ODA instance runs on the same Arc machine** with its own working directory
+and its own Log Analytics workspace (this section), no DCR watches the new directory: the tasks run
+and write result files, but the Azure Monitor Agent does not collect them and the new workspace stays
+empty.
+
+This was the situation at the customer: one Arc server, two parallel ODA instances. The existing DCRs
+pointed only to `c:\Assessments\…` and the old workspace. It does **not** apply when every ODA instance
+has its own collector (own Arc machine); that machine then gets its own DCRs from the enrollment
+(expected, not verified here).
+
+Check first (Azure portal → Monitor → Data Collection Rules, or the Arc machine → Data collection
+rules): is there already a DCR whose file pattern matches the new working directory and whose
+destination is the new workspace? If not, create two additional DCRs and associate them with the same
+Arc machine. The helper script [`Azure/New-ODAJitDataCollectionRules.ps1`](../Azure/New-ODAJitDataCollectionRules.ps1)
+clones the existing DCRs and changes only the file pattern and the destination workspace:
+
+```powershell
+# Preview (reads only), then run without -WhatIf
+.\Azure\New-ODAJitDataCollectionRules.ps1 -SubscriptionId <id> -ResourceGroup <rg> `
+    -ArcMachineName ODA-COL-A -TargetWorkspaceName <new-LAW> -WorkingDirectory C:\Assessments-FullEA -WhatIf
+```
+
+- The existing DCRs, their associations and the data collection endpoint stay untouched; the new DCRs
+  reuse the same endpoint (one DCE serves any number of DCRs in the region).
+- **Do not rebuild the DCRs by hand with `az monitor … show/create`.** The transform (`transformKql`)
+  contains non-breaking spaces (U+00A0) that the CLI console output silently drops; the copied KQL is
+  then invalid (`extendrowData=…`). The script uses the ARM REST API with UTF-8 and compares the
+  transform with the original.
+- Verify after the first run (10–15 min): `ADAssessmentRecommendation | where TimeGenerated > ago(2h)`
+  in the new workspace. The Engage Center Connector tile may keep showing "In progress /
+  Configuration required" until its own **Configure** step is completed; back up the existing DCRs
+  before running it (it may touch DCRs – not verified).
+- Remove again: same call with `-Remove` (deletes only the DCRs and associations the script created).
+
 Validate the configuration:
 
 ```powershell

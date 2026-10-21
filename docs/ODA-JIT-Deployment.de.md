@@ -493,6 +493,45 @@ WorkingDirectory = 'C:\Assessments-FullEA'   # eigener Ordner je Instanz (-Worki
   nur verzögern (die Deadline greift trotzdem).
 - Ein Pfad, der nichts trifft, meldet der Grant als `ODA task(s) not found …`.
 
+**Azure-Seite: zusätzliche Data Collection Rules (nur für diese Konstellation).** Das
+ODA-Enrollment legt je Assessment-Art eine Azure-Monitor-**Data Collection Rule (DCR)** für die
+Arc-Maschine an (`ad-dcr-rule`, `adsecurity-dcr-rule`). Jede DCR hat ein **festes Dateimuster** – das
+Arbeitsverzeichnis der Instanz, z. B. `c:\Assessments\ADAssessment\*.assessmentadrecs` – und **genau
+einen** Ziel-Workspace. Läuft eine **zweite ODA-Instanz auf derselben Arc-Maschine** mit eigenem
+Arbeitsverzeichnis und eigenem Log-Analytics-Workspace (dieser Abschnitt), überwacht keine DCR das neue
+Verzeichnis: Die Aufgaben laufen und schreiben Ergebnisdateien, der Azure Monitor Agent sammelt sie aber
+nicht ein, und der neue Workspace bleibt leer.
+
+So war es beim Kunden: ein Arc-Server, zwei parallele ODA-Instanzen. Die vorhandenen DCRs zeigten nur
+auf `c:\Assessments\…` und den alten Workspace. Es gilt **nicht**, wenn jede ODA-Instanz einen eigenen
+Collector (eigene Arc-Maschine) hat; diese Maschine bekommt dann ihre eigenen DCRs aus dem Enrollment
+(erwartet, hier nicht geprüft).
+
+Zuerst prüfen (Azure-Portal → Monitor → Data Collection Rules bzw. Arc-Maschine → Data collection
+rules): Gibt es schon eine DCR, deren Dateimuster zum neuen Arbeitsverzeichnis passt und deren Ziel der
+neue Workspace ist? Wenn nicht, zwei zusätzliche DCRs anlegen und derselben Arc-Maschine zuordnen. Das
+Hilfsskript [`Azure/New-ODAJitDataCollectionRules.ps1`](../Azure/New-ODAJitDataCollectionRules.ps1)
+klont die vorhandenen DCRs und ändert nur Dateimuster und Ziel-Workspace:
+
+```powershell
+# Vorschau (nur lesend), danach ohne -WhatIf ausführen
+.\Azure\New-ODAJitDataCollectionRules.ps1 -SubscriptionId <id> -ResourceGroup <rg> `
+    -ArcMachineName ODA-COL-A -TargetWorkspaceName <neue-LAW> -WorkingDirectory C:\Assessments-FullEA -WhatIf
+```
+
+- Die vorhandenen DCRs, ihre Zuordnungen und der Data Collection Endpoint bleiben unverändert; die neuen
+  DCRs nutzen denselben Endpoint (ein DCE bedient beliebig viele DCRs in der Region).
+- **DCRs nicht von Hand mit `az monitor … show/create` nachbauen.** Die Transformation (`transformKql`)
+  enthält geschützte Leerzeichen (U+00A0), die die CLI-Konsolenausgabe stillschweigend entfernt; das
+  kopierte KQL ist dann ungültig (`extendrowData=…`). Das Skript nutzt die ARM-REST-API mit UTF-8 und
+  vergleicht die Transformation mit dem Original.
+- Nach dem ersten Lauf prüfen (10–15 min): `ADAssessmentRecommendation | where TimeGenerated > ago(2h)`
+  im neuen Workspace. Die Kachel im Engage Center Connector kann „In progress / Configuration required“
+  zeigen, bis dessen eigener **Configure**-Schritt abgeschlossen ist; vorher die vorhandenen DCRs sichern
+  (er könnte DCRs anfassen – nicht geprüft).
+- Wieder entfernen: derselbe Aufruf mit `-Remove` (löscht nur die vom Skript angelegten DCRs und
+  Zuordnungen).
+
 Ob die Konfiguration gültig ist, prüft man so:
 
 ```powershell
