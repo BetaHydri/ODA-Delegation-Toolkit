@@ -225,6 +225,58 @@ Voraussetzung ist dieselbe wie oben (PAM aktiv, FFL 2016). Ohne aktives PAM schl
 `-MemberTimeToLive` fehl. Diese manuelle Nutzung ist nicht Teil von ODA-JIT und wird hier nur zur
 Information gezeigt.
 
+### 2.5 Referenz-Topologie: JIT auf einem Root-DC, Collector als Member-Server in einer Child-Domäne
+
+Häufige Konstellation: Der JIT-Ablauf läuft auf einem **Domain Controller der Root-Domäne**. Der
+Collector ist ein **Member-Server in einer Child-Domäne** und führt die ODA-Aufgaben mit einem
+eigenen gMSA aus.
+
+| Rolle | Ort | Konto / Objekt |
+| ----- | --- | -------------- |
+| JIT-Host (Skripte, Aufgaben Grant/Revoke) | Root-DC `DC01.forest-a.example`, Ordner `C:\ODA-JIT` | Ausführer `FORESTA\svc-ODA-JIT$` (gMSA der Root-Domäne, Domain Admin der Root-Domäne) |
+| Collector (ODA-Aufgaben) | Member-Server `ODA-COL-A.child.forest-a.example` | Assessment-gMSA `CHILDA\gMSA-ODA-FullEA$` (gMSA der Child-Domäne) |
+| JIT-Gruppe | Child-Domäne, globale Gruppe `ODA-FullEA-Accounts` | enthält das Assessment-gMSA, wird per JIT in **Enterprise Admins** der Root-Domäne aufgenommen |
+| Host-Gruppe Ausführer | Root-Domäne | enthält das Computerkonto des JIT-DC, darf das Kennwort von `svc-ODA-JIT$` abrufen |
+| Host-Gruppe Collector | Child-Domäne | enthält das Computerkonto des Collectors, darf das Kennwort von `gMSA-ODA-FullEA$` abrufen |
+
+```powershell
+# ODAJit.<forest>.psd1 für diese Topologie
+ForestName         = 'forest-a.example'
+ForestRootServer   = 'DC01.forest-a.example'                       # Root-DC (kann der JIT-Host selbst sein)
+AccountGroupDN     = 'CN=ODA-FullEA-Accounts,OU=Tier0-Groups,DC=child,DC=forest-a,DC=example'   # Gruppe in der CHILD-Domäne
+SiteGlobalCatalogs = @('GC01.child.forest-a.example')              # GCs im AD-Standort des Collectors
+ExecutorAccount    = 'FORESTA\svc-ODA-JIT$'
+Collector          = 'ODA-COL-A.child.forest-a.example'
+```
+
+Eine globale Gruppe aus einer Child-Domäne darf Mitglied der universellen Gruppe Enterprise Admins
+sein. Der Ausführer schreibt die Mitgliedschaft über einen Root-DC (`-Server`), das Mitglied wird in
+seiner eigenen Domäne aufgelöst.
+
+Was in dieser Topologie zusätzlich zu beachten ist:
+
+1. **Batch-Recht auf dem DC.** Auf einem DC haben nur Administratoren, Backup Operators und
+   Performance Log Users „Als Stapelverarbeitungsauftrag anmelden“. Für `svc-ODA-JIT$` muss das Recht
+   in einer **GPO für die Domain Controllers** stehen. Eine Zuweisung in einer höher priorisierten
+   GPO **ersetzt** die Liste: die bisherigen Konten mit aufnehmen oder in der bestehenden Policy
+   ergänzen. Per Security Filtering auf den JIT-DC begrenzen, sonst gilt sie für alle DCs.
+2. **Host-Gruppe ohne `Domain Controllers`.** Nur das Computerkonto des JIT-DC in die Host-Gruppe
+   aufnehmen, sonst dürfte jeder DC das Kennwort des Ausführers abrufen. Nach der Aufnahme den DC
+   neu starten oder `klist -li 0x3e7 purge` ausführen.
+3. **Ausführer auf dem Collector.** Ein Domain Admin der Root-Domäne ist auf Servern einer
+   Child-Domäne **nicht** automatisch lokaler Admin. `FORESTA\svc-ODA-JIT$` explizit zu den lokalen
+   Administratoren des Collectors hinzufügen (Schritt 3).
+4. **Assessment-gMSA auf dem Collector.** Lokaler Administrator und „Als Stapelverarbeitungsauftrag
+   anmelden“ (Anforderung von ODA). Keine Deny-Rechte der Tier-Policy für Enterprise Admins auf dem
+   Collector, sonst scheitert der Start der Aufgabe im EA-Fenster.
+5. **Netzwerk.** JIT-DC → Root-DC und GCs im Collector-Standort: TCP 9389. JIT-DC → Collector:
+   TCP 5985 und 445. Der Collector erreicht alle DCs wie von ODA gefordert.
+6. **Einzelner JIT-Host.** Fällt der DC aus, läuft kein Grant, und die Assessments laufen ohne EA. Ein
+   ausbleibender Revoke ist durch die PAM-TTL abgesichert (Event 1013).
+7. **adminCount.** Gruppe und gMSA werden durch die Verschachtelung in Enterprise Admins geschützt
+   (AdminSDHolder). `adminCount=1` bleibt nach dem Revoke bestehen, delegierte ACLs auf den Objekten
+   werden zurückgesetzt.
+
 ## 3. Einrichtung je Forest – Schritt für Schritt
 
 Die Beispiele verwenden Forest `forest-a.example`, Root-Domäne `FORESTA`, Collector-Domäne
@@ -310,9 +362,30 @@ notepad 'C:\ODA-JIT\Config\ODAJit.forest-a.psd1'
 | `OdaTaskNames` | Namen der ODA-Aufgaben, die Enterprise Admins brauchen | Standard `ADAssessment`, `ADSecurityAssessment`. **Nur** die AD-Assessments eintragen; Assessments ohne EA-Bedarf (z. B. `WindowsServerAssessment`) hier weglassen |
 | `OdaTaskPath` | Optional: Aufgabenordner **einer** ODA-Instanz (Präfix) | Nur nötig, wenn auf dem Collector mehrere ODA-Instanzen laufen (siehe unten). Beispiel `\Microsoft\Operations Management Suite\AOI-<WorkspaceId>\`. Leer = nur Filter über `OdaTaskNames` |
 | `WindowDay` / `WindowStart` | Wochentag (englisch) und Startzeit der **ersten** ODA-Aufgabe | muss zum Zeitplan auf dem Collector passen (Schritt 6) |
-| `GrantLeadMinutes`, `GraceMinutes`, `NoStartTimeoutMinutes`, `DeadlineHours`, `TtlHours` | Zeitsteuerung | Standard 60 / 30 / 90 / 6 / 8. Deadline ≥ 3× längste gemessene Laufzeit; TTL > Vorlauf + Deadline |
+| `GrantLeadMinutes` | **Vorlaufzeit des Grants**: Die Grant-Aufgabe nimmt die Gruppe so viele Minuten **vor** `WindowStart` in Enterprise Admins auf | Standard `60`. Muss die Zeit bis zur Sichtbarkeit der Mitgliedschaft auf den `SiteGlobalCatalogs` und bis zur Nutzbarkeit des gMSA-Tickets abdecken (Replikation, `VerifyTimeoutMinutes`). Legt zugleich die Startzeit der Grant-Aufgabe fest |
+| `GraceMinutes` | **Sicherheitswartezeit vor dem Entzug**: Sieht der Watcher das Endesignal (alle Aufgaben gelaufen, kein `OMSAssessment.exe`), wartet er so lange und prüft erneut; nur bei unverändertem Zustand wird EA entzogen | Standard `30`. Deckt kurze Pausen zwischen zwei Aufgaben oder nachlaufende Prozesse ab, damit EA nicht mitten im Lauf entfällt. Ändert sich der Zustand (neuer Lauf startet), beobachtet der Watcher weiter. Reicht nie über die Deadline hinaus |
+| `NoStartTimeoutMinutes` | **Grenze „Aufgabe ist nicht gestartet"**, gemessen ab `WindowStart`: Eine aufgeführte Aufgabe, die bis dahin nicht gelaufen ist, gilt als *nicht gelaufen*. Läuft zugleich nichts, lautet das Ergebnis `Incomplete` (Entzug + Warnung statt Warten bis zur Deadline) | Standard `90`. Muss **größer als der Startversatz der letzten ODA-Aufgabe** sein (z. B. zweite Aufgabe bei +30 min → mindestens 31) und **kleiner als** `DeadlineHours` (Letzteres erzwingt die Konfigurationsprüfung) |
+| `DeadlineHours` | **Harte Obergrenze des EA-Fensters**: Bei `WindowStart` + dieser Zeit entzieht der Watcher EA **unabhängig vom Zustand** (Ergebnis `Deadline`, Event 1012). Begrenzt zugleich die Laufzeit der Watcher-Aufgabe (+1 h) | Standard `6`. Mindestens **3× die längste gemessene Gesamtlaufzeit** aller aufgeführten Aufgaben; so kurz wie möglich halten (EA bleibt bei hängender Aufgabe bis dahin aktiv). Nicht über mehrere Tage dehnen |
+| `TtlHours` | **PAM-Lebensdauer der Mitgliedschaft** (nur mit `UsePamTtl = $true`): AD entfernt die Mitgliedschaft nach dieser Zeit selbst, **auch wenn Tier-0-Host oder Watcher ausfallen** (letzte Absicherung; Event 1013 meldet einen fehlgeschlagenen Entzug) | Standard `8`. Die TTL beginnt beim Grant und muss daher `GrantLeadMinutes` + `DeadlineHours` übersteigen (erzwingt die Konfigurationsprüfung); etwa 1 h Reserve einplanen, damit die TTL keinen regulären Lauf abschneidet |
 | `UsePamTtl` | PAM-TTL verwenden | `$false`, falls PAM nicht aktiv ist (2.4) |
 | `LogDirectory` | Log-Ordner | `C:\ODA-JIT\Logs` |
+
+**Zusammenspiel der fünf Zeitwerte** (Standardwerte, `WindowStart` = Sonntag 02:00, zweite Aufgabe um 02:30):
+
+```text
+01:00  Grant-Aufgabe    GrantLeadMinutes = 60   EA-Mitgliedschaft gesetzt (PAM-TTL startet: TtlHours = 8 -> läuft 09:00 ab)
+02:00  WindowStart      ADAssessment startet    (+30 min: ADSecurityAssessment)
+02:15  Watcher startet  WatcherStartOffsetMinutes, danach Abfrage alle PollMinutes
+03:30  NoStartTimeout   90 min nach WindowStart: nicht gestartete Aufgabe gilt als „nicht gelaufen" (Incomplete)
+  ...  Endesignal       alle Aufgaben gelaufen + kein OMSAssessment.exe -> GraceMinutes (30) warten, erneut prüfen -> Entzug
+08:00  Deadline         DeadlineHours = 6: Entzug unabhängig vom Zustand
+09:00  PAM-TTL          TtlHours = 8: AD entfernt die Mitgliedschaft selbst (Absicherung bei Ausfall von Watcher/Host)
+```
+
+Faustregel: Im Normalfall erfolgt der Entzug nach dem Endesignal + `GraceMinutes`;
+`NoStartTimeoutMinutes` beendet das Warten früh, wenn eine Aufgabe nie startet; `DeadlineHours`
+begrenzt einen hängenden Lauf; `TtlHours` ist die unabhängige letzte Absicherung. Reihenfolge:
+`NoStartTimeoutMinutes` < `DeadlineHours` < `GrantLeadMinutes` + `DeadlineHours` < `TtlHours`.
 
 > **Ein Aufgabenpaar pro Forest reicht.** `OdaTaskNames` ist eine **Liste** – ein einziges
 > Grant-/Watcher-Paar deckt **alle** aufgeführten AD-Assessments ab. Der Watcher entzieht EA erst,

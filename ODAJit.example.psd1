@@ -26,13 +26,16 @@
     WindowStart        = '02:00'                           # HH:mm, start of the FIRST ODA task
 
     # --- Timing ---------------------------------------------------------------------------
-    GrantLeadMinutes          = 60   # grant this long before WindowStart
+    # Timeline: Grant (WindowStart - GrantLead) -> WindowStart -> Watcher (+offset) -> end signal + Grace -> revoke
+    #           NoStartTimeout / Deadline (both from WindowStart) end the wait early / at the latest;
+    #           the PAM TTL (from the grant) removes EA by itself if the watcher or host fails.
+    GrantLeadMinutes          = 60   # grant this long before WindowStart (replication + ticket refresh time)
     WatcherStartOffsetMinutes = 15   # watcher starts this long after WindowStart
     PollMinutes               = 5    # watcher polling interval
-    GraceMinutes              = 30   # wait after the end signal before revoking
-    NoStartTimeoutMinutes     = 90   # tasks not started by then count as 'not run' (> last task offset)
-    DeadlineHours             = 6    # hard revoke at WindowStart + DeadlineHours (>= 3x longest run)
-    TtlHours                  = 8    # PAM TTL backstop; must exceed GrantLead + Deadline
+    GraceMinutes              = 30   # wait after the end signal (all tasks ran, no OMSAssessment.exe), then re-check, then revoke
+    NoStartTimeoutMinutes     = 90   # from WindowStart: a task not started by then counts as 'not run' -> revoke early (> last task offset, < Deadline)
+    DeadlineHours             = 6    # from WindowStart: hard revoke regardless of state (>= 3x longest run)
+    TtlHours                  = 8    # from the grant: PAM TTL backstop; must exceed GrantLead + Deadline (keep ~1 h reserve)
     UsePamTtl                 = $true  # $false if the PAM optional feature is not enabled (FFL < 2016)
     VerifyTimeoutMinutes      = 30   # max wait for the membership to show up on SiteGlobalCatalogs
 

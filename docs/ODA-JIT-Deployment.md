@@ -215,6 +215,55 @@ The prerequisite is the same as above (PAM enabled, FFL 2016). Without active PA
 `-MemberTimeToLive` fails. This manual use is not part of ODA-JIT and is shown here for information
 only.
 
+### 2.5 Reference topology: JIT on a root DC, collector as a member server in a child domain
+
+A common constellation: the JIT flow runs on a **domain controller of the root domain**. The collector
+is a **member server in a child domain** and runs the ODA tasks with its own gMSA.
+
+| Role | Location | Account / object |
+| ---- | -------- | ---------------- |
+| JIT host (scripts, Grant/Revoke tasks) | Root DC `DC01.forest-a.example`, folder `C:\ODA-JIT` | Executor `FORESTA\svc-ODA-JIT$` (root-domain gMSA, Domain Admin of the root domain) |
+| Collector (ODA tasks) | Member server `ODA-COL-A.child.forest-a.example` | Assessment gMSA `CHILDA\gMSA-ODA-FullEA$` (child-domain gMSA) |
+| JIT group | Child domain, global group `ODA-FullEA-Accounts` | contains the assessment gMSA, added by JIT to **Enterprise Admins** of the root domain |
+| Executor host group | Root domain | contains the computer account of the JIT DC, may retrieve the password of `svc-ODA-JIT$` |
+| Collector host group | Child domain | contains the computer account of the collector, may retrieve the password of `gMSA-ODA-FullEA$` |
+
+```powershell
+# ODAJit.<forest>.psd1 for this topology
+ForestName         = 'forest-a.example'
+ForestRootServer   = 'DC01.forest-a.example'                       # root DC (may be the JIT host itself)
+AccountGroupDN     = 'CN=ODA-FullEA-Accounts,OU=Tier0-Groups,DC=child,DC=forest-a,DC=example'   # group in the CHILD domain
+SiteGlobalCatalogs = @('GC01.child.forest-a.example')              # GCs in the collector's AD site
+ExecutorAccount    = 'FORESTA\svc-ODA-JIT$'
+Collector          = 'ODA-COL-A.child.forest-a.example'
+```
+
+A global group from a child domain may be a member of the universal group Enterprise Admins. The
+executor writes the membership through a root DC (`-Server`); the member is resolved in its own domain.
+
+Additional points for this topology:
+
+1. **Batch right on the DC.** On a DC only Administrators, Backup Operators and Performance Log
+   Users hold "Log on as a batch job". `svc-ODA-JIT$` needs the right in a **GPO for the Domain
+   Controllers**. An assignment in a higher-priority GPO **replaces** the list: include the existing
+   accounts or extend the existing policy. Limit it to the JIT DC with security filtering, otherwise
+   it applies to all DCs.
+2. **Host group without `Domain Controllers`.** Add only the JIT DC's computer account to the host group,
+   otherwise every DC could retrieve the executor's password. After adding it, restart the DC or run
+   `klist -li 0x3e7 purge`.
+3. **Executor on the collector.** A root-domain Domain Admin is **not** automatically a local admin
+   on servers of a child domain. Add `FORESTA\svc-ODA-JIT$` explicitly to the collector's local
+   administrators (step 3).
+4. **Assessment gMSA on the collector.** Local administrator and "Log on as a batch job" (ODA
+   requirement). No tier-policy deny rights for Enterprise Admins on the collector, otherwise the task
+   fails to start in the EA window.
+5. **Network.** JIT DC → root DC and GCs in the collector's site: TCP 9389. JIT DC → collector:
+   TCP 5985 and 445. The collector reaches all DCs as ODA requires.
+6. **Single JIT host.** If the DC is down, no grant runs and the assessments run without EA. A missing
+   revoke is covered by the PAM TTL (event 1013).
+7. **adminCount.** Group and gMSA become protected through the nesting in Enterprise Admins
+   (AdminSDHolder). `adminCount=1` remains after the revoke, delegated ACLs on the objects are reset.
+
 ## 3. Setup per forest – step by step
 
 The examples use forest `forest-a.example`, root domain `FORESTA`, collector domain
@@ -300,9 +349,30 @@ notepad 'C:\ODA-JIT\Config\ODAJit.forest-a.psd1'
 | `OdaTaskNames` | Names of the ODA tasks that require Enterprise Admins | default `ADAssessment`, `ADSecurityAssessment`. List **only** the AD assessments; leave out assessments that do not need EA (e.g. `WindowsServerAssessment`) |
 | `OdaTaskPath` | Optional: task folder (prefix) of **one** ODA instance | Only needed when several ODA instances run on the collector (see below). Example `\Microsoft\Operations Management Suite\AOI-<WorkspaceId>\`. Empty = filter by `OdaTaskNames` only |
 | `WindowDay` / `WindowStart` | Weekday (English) and start time of the **first** ODA task | must match the schedule on the collector (step 6) |
-| `GrantLeadMinutes`, `GraceMinutes`, `NoStartTimeoutMinutes`, `DeadlineHours`, `TtlHours` | Timing | default 60 / 30 / 90 / 6 / 8. Deadline ≥ 3× longest measured run; TTL > lead + deadline |
+| `GrantLeadMinutes` | **Lead time of the grant**: the Grant task adds the group to Enterprise Admins this many minutes **before** `WindowStart` | Default `60`. Must cover the time until the membership is visible on `SiteGlobalCatalogs` and the gMSA's ticket is usable (replication, `VerifyTimeoutMinutes`). Also sets the start time of the Grant task |
+| `GraceMinutes` | **Safety wait before the revoke**: after the watcher sees the end signal (all tasks ran, no `OMSAssessment.exe`), it waits this long and checks again; only if the state is unchanged does it revoke | Default `30`. Covers short gaps between two tasks or late follow-up processes so EA is not removed in the middle of a run. If the state changes (new run starts), the watcher keeps watching. Never extends beyond the deadline |
+| `NoStartTimeoutMinutes` | **"Task did not start" limit**, measured from `WindowStart`: a listed task that has not run by then counts as *not run*. When nothing is running either, the outcome is `Incomplete` (revoke + warning instead of waiting until the deadline) | Default `90`. Must be **greater than the start offset of the last ODA task** (e.g. second task at +30 min → at least 31) and **shorter than** `DeadlineHours` (the config validation enforces the latter) |
+| `DeadlineHours` | **Hard upper limit of the EA window**: at `WindowStart` + this time the watcher revokes EA **regardless of the state** (outcome `Deadline`, event 1012). Also limits the runtime of the Watcher task (+1 h) | Default `6`. At least **3× the longest measured total run** of all listed tasks; keep it as short as possible (EA is active until then if a task hangs). Do not stretch across several days |
+| `TtlHours` | **PAM time-to-live of the membership** (only with `UsePamTtl = $true`): AD removes the membership by itself after this time, **even if the Tier-0 host or the watcher fails** (last backstop, event 1013 covers a failed revoke) | Default `8`. The TTL starts at the grant, so it must exceed `GrantLeadMinutes` + `DeadlineHours` (the config validation enforces this); keep a reserve of about 1 h so the TTL never cuts a regular run |
 | `UsePamTtl` | Use the PAM TTL | `$false` if PAM is not enabled (2.4) |
 | `LogDirectory` | Log folder | `C:\ODA-JIT\Logs` |
+
+**How the five timing values work together** (defaults, `WindowStart` = Sunday 02:00, second task at 02:30):
+
+```text
+01:00  Grant task       GrantLeadMinutes = 60   EA membership set (PAM TTL starts: TtlHours = 8 -> expires 09:00)
+02:00  WindowStart      ADAssessment starts     (+30 min: ADSecurityAssessment)
+02:15  Watcher starts   WatcherStartOffsetMinutes, then polls every PollMinutes
+03:30  NoStartTimeout   90 min after WindowStart: a task that has not started counts as "not run" (Incomplete)
+  ...  End signal       all tasks ran + no OMSAssessment.exe -> wait GraceMinutes (30), check again -> revoke
+08:00  Deadline         DeadlineHours = 6: revoke regardless of the state
+09:00  PAM TTL          TtlHours = 8: AD removes the membership itself (backstop if the watcher/host failed)
+```
+
+Rule of thumb: normal case = revoke after the end signal + `GraceMinutes`; `NoStartTimeoutMinutes` ends
+the wait early when a task never starts; `DeadlineHours` limits a hanging run; `TtlHours` is the
+independent last line of defence. Order: `NoStartTimeoutMinutes` < `DeadlineHours` < `GrantLeadMinutes` +
+`DeadlineHours` < `TtlHours`.
 
 > **One task pair per forest is enough.** `OdaTaskNames` is a **list** – a single Grant/Watcher
 > pair covers **all** listed AD assessments. The watcher removes EA only after **every** listed task
