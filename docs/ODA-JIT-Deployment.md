@@ -297,16 +297,34 @@ Add-ADGroupMember -Identity 'ODA-Assessment-Accounts' -Members 'gMSA-ODA$' -Serv
 An existing **standing** EA membership of the gMSA is only removed in step 9, once the JIT flow
 works.
 
-### Step 3 – Grant the executor rights on the collector server
+### Step 3 – Grant the executor and the assessment gMSA rights on the collector server
+
+Two different accounts need rights on the collector – do not mix them up:
+
+| Account | Needs on the collector | Why |
+| ------- | ---------------------- | --- |
+| Executor `FORESTA\svc-ODA-JIT$` | **Local administrator** | WinRM/CIM queries of the ODA tasks and `C$` access from the Tier-0 host |
+| Assessment gMSA `CHILDA\gMSA-ODA$` (the gMSA from step 2) | **Local administrator** + **Log on as a batch job** | Microsoft's ODA prerequisite: the account the ODA tasks run under (`ScheduledTaskUsername`) must be local admin on the collector. Being Enterprise Admin in AD (JIT) does **not** replace this – without local admin the assessment fails on the collector itself even with a valid EA token |
 
 ```powershell
 # On the collector (or via GPO "Restricted Groups" / "Local Users and Groups")
-Add-LocalGroupMember -SID 'S-1-5-32-544' -Member 'FORESTA\svc-ODA-JIT$'
+Add-LocalGroupMember -SID 'S-1-5-32-544' -Member 'FORESTA\svc-ODA-JIT$'   # executor
+Add-LocalGroupMember -SID 'S-1-5-32-544' -Member 'CHILDA\gMSA-ODA$'       # assessment gMSA
+
+# The gMSA must be installed on the collector and "Log on as a batch job" granted
+# (secpol.msc -> Local Policies -> User Rights Assignment, or GPO)
+Test-ADServiceAccount -Identity 'gMSA-ODA$'                               # must return True
+Get-LocalGroupMember -SID 'S-1-5-32-544' | Select-Object Name, ObjectClass
 
 # Test from the Tier-0 host (in a session as svc-ODA-JIT$ or later in the trial run)
 Test-WSMan ODA-COL-A.child.forest-a.example
 Test-Path  '\\ODA-COL-A.child.forest-a.example\C$\Assessments'
 ```
+
+The collector's host group must be allowed to retrieve the gMSA password
+(`PrincipalsAllowedToRetrieveManagedPassword`, see 2.5). Without the batch right the ODA task fails at
+start (`0x80070569`, logon type not granted); without local admin the assessment fails during the
+run – the JIT scripts cannot fix either.
 
 Collector firewall: allow TCP 5985 and 445 **only** from the Tier-0 host.
 

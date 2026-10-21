@@ -310,16 +310,34 @@ Add-ADGroupMember -Identity 'ODA-Assessment-Accounts' -Members 'gMSA-ODA$' -Serv
 Eine bestehende **dauerhafte** EA-Mitgliedschaft des gMSA wird erst in Schritt 9 entfernt, wenn
 der JIT-Ablauf funktioniert.
 
-### Schritt 3 – Ausführer auf dem Collector-Server berechtigen
+### Schritt 3 – Ausführer und Assessment-gMSA auf dem Collector-Server berechtigen
+
+Zwei verschiedene Konten brauchen Rechte auf dem Collector – nicht verwechseln:
+
+| Konto | Benötigt auf dem Collector | Warum |
+| ----- | -------------------------- | ----- |
+| Ausführer `FORESTA\svc-ODA-JIT$` | **Lokaler Administrator** | WinRM/CIM-Abfragen der ODA-Aufgaben und `C$`-Zugriff vom Tier-0-Host |
+| Assessment-gMSA `CHILDA\gMSA-ODA$` (das gMSA aus Schritt 2) | **Lokaler Administrator** + **Als Stapelverarbeitungsauftrag anmelden** | ODA-Voraussetzung von Microsoft: Das Konto, unter dem die ODA-Aufgaben laufen (`ScheduledTaskUsername`), muss lokaler Admin auf dem Collector sein. Enterprise Admin im AD (JIT) ersetzt das **nicht** – ohne lokalen Admin scheitert das Assessment auf dem Collector selbst, auch mit gültigem EA-Token |
 
 ```powershell
 # Auf dem Collector (oder per GPO "Restricted Groups"/"Lokale Benutzer und Gruppen")
-Add-LocalGroupMember -SID 'S-1-5-32-544' -Member 'FORESTA\svc-ODA-JIT$'
+Add-LocalGroupMember -SID 'S-1-5-32-544' -Member 'FORESTA\svc-ODA-JIT$'   # Ausführer
+Add-LocalGroupMember -SID 'S-1-5-32-544' -Member 'CHILDA\gMSA-ODA$'       # Assessment-gMSA
+
+# Das gMSA muss auf dem Collector installiert sein und "Als Stapelverarbeitungsauftrag anmelden" besitzen
+# (secpol.msc -> Lokale Richtlinien -> Zuweisen von Benutzerrechten, oder GPO)
+Test-ADServiceAccount -Identity 'gMSA-ODA$'                               # muss True liefern
+Get-LocalGroupMember -SID 'S-1-5-32-544' | Select-Object Name, ObjectClass
 
 # Vom Tier-0-Host testen (in einer Sitzung als svc-ODA-JIT$ bzw. später im Probelauf)
 Test-WSMan ODA-COL-A.child.forest-a.example
 Test-Path  '\\ODA-COL-A.child.forest-a.example\C$\Assessments'
 ```
+
+Die Host-Gruppe des Collectors muss das gMSA-Kennwort abrufen dürfen
+(`PrincipalsAllowedToRetrieveManagedPassword`, siehe 2.5). Ohne das Batch-Recht scheitert die
+ODA-Aufgabe beim Start (`0x80070569`, Anmeldetyp nicht gewährt); ohne lokalen Admin scheitert das
+Assessment während des Laufs – die JIT-Skripte können beides nicht beheben.
 
 Firewall des Collectors: TCP 5985 und 445 **nur** vom Tier-0-Host zulassen.
 
