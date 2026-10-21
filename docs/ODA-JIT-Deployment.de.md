@@ -487,8 +487,13 @@ Import-ODAJitConfig -Path C:\ODA-JIT\Config\ODAJit.forest-a.psd1    # wirft eine
 Die ODA-Aufgaben laufen alle 7 Tage. Ihr Startzeitpunkt muss zu `WindowDay`/`WindowStart` passen.
 Im Beispiel startet AD sonntags um 02:00 und AD Security sonntags um 02:30.
 
-- Aufgabenplanung auf dem Collector → Microsoft → Operations Management Suite → AOI-… →
-  Assessments → `ADAssessment` bzw. `ADSecurityAssessment` → Trigger bearbeiten.
+- **Trigger mit PowerShell ändern, nicht in der Aufgabenplanungs-Oberfläche.** Die ODA-Aufgaben laufen
+  unter einem **gMSA**. Die Oberfläche kann kein gMSA auswählen und fragt beim Speichern nach einem
+  Kennwort – die Aufgaben dort nicht speichern. `Set-ScheduledTask -Trigger` verwenden, wie unten unter
+  *Startzeit oder Wochentag einer Assessment-Aufgabe ändern* beschrieben (das gMSA bleibt unverändert,
+  kein Kennwort nötig). Zum **Ansehen** (Microsoft → Operations Management Suite → AOI-… →
+  Assessments → `ADAssessment` bzw. `ADSecurityAssessment`) und für **Ausführen** ist die Oberfläche
+  unbedenklich.
 - Danach prüfen:
 
 ```powershell
@@ -539,6 +544,7 @@ am Dienstag):
 
 # 2) TaskPath ermitteln – ODA-Aufgaben liegen in einem Unterordner, daher Pflicht
 $tp = (Get-ScheduledTask -TaskName ADSecurityAssessment).TaskPath   # z. B. \Microsoft\Operations Management Suite\AOI-…\Assessments\
+Export-ScheduledTask -TaskName ADSecurityAssessment -TaskPath $tp | Set-Content C:\Temp\ADSecurityAssessment.task.xml   # Sicherung der Ausgangslage
 
 # 3) Nur den Trigger ändern – gMSA bleibt unangetastet, kein Passwort nötig
 $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Tuesday -At ([datetime]'07:00')
