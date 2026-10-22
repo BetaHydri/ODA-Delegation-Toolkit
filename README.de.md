@@ -10,6 +10,20 @@ Verwalten Sie die WMI-Namespace-Sicherheit (DACL) und die Berechtigungen des Ser
 
 Diese Skripte sind essenziell für die **Least-Privilege-Delegation des ODA Active Directory Assessments** und ermöglichen es einem Dienstkonto ohne Domänen-Admin-/Enterprise-Admin-Rechte, WMI und SCM auf Domänencontrollern abzufragen.
 
+## Unterstützte Wege
+
+Das Toolkit unterstützt mehrere Wege, dem ODA-Assessment-Konto den nötigen Zugriff zu geben. Wählen Sie einen Weg (kombinierbar mit der optionalen Härtung in Weg E):
+
+| Weg | Ansatz | Dauerhafte Tier-0-Exposition | Skripte | Dokumentation |
+| --- | ------ | ---------------------------- | ------- | ------------- |
+| **A — Delegation** | Statische Least-Privilege-Delegation für ein gMSA (WMI, SCM, Netlogon, AD-Rechte, SYSVOL, DFSR). Kein Domain-/Enterprise-Admin. Prüfung mit `Get-ODADelegationStatus.ps1` | Backup Operators, SYSVOL-Modify und Replizierung von Verzeichnisänderungen sind dauerhaft | `Process-DCs.ps1` und die `Set-*`-Skripte | [Delegationsleitfaden](docs/ODA-Delegation-Guide.de.md) ([EN](docs/ODA-Delegation-Guide.md)) · [Skripte](#skripte) |
+| **B — JIT (granular)** | Wie Weg A, aber die Tier-0-/schreibfähigen Rechte werden nur rund um das wöchentliche Fenster vergeben | Keine außerhalb des Fensters | `Invoke-ODAJitDelegation.ps1` (`-Mode Granular`) | [JIT-Alternative](#invoke-odajitdelegationps1-just-in-time-alternative) · [Delegationsleitfaden](docs/ODA-Delegation-Guide.de.md) |
+| **C — JIT (Full EA, manuelle Trigger)** | Einzelne zeitlich begrenzte Enterprise-Admins-Mitgliedschaft (PAM-TTL), per eigenen Triggern umgeschaltet | Keine außerhalb des Fensters (ein dauerhafter Tier-0-Ausführer) | `Invoke-ODAJitDelegation.ps1` (`-Mode FullEA`) | [Variante C](#variante-c--vollständige-rechteerhöhung-enterprise-admin-mit--mode-fullea) |
+| **D — JIT (Full EA, automatisiert)** | Grant per Zeitplan vor dem Fenster, Watcher entzieht nach Ende des ODA-Laufs plus Karenzzeit, harte Deadline, eine Konfiguration je Forest | Keine außerhalb des Fensters (ein dauerhafter Tier-0-Ausführer) | `Start-ODAJitGrant.ps1`, `Start-ODAJitRevokeWatcher.ps1`, `Register-ODAJitTasks.ps1`, `ODAJit.Common.psm1` | [ODA-JIT-Automatisierung](#oda-jit-automatisierung-fullea-grant-revoke-watcher-geplante-aufgaben) · [Bereitstellungsleitfaden](docs/ODA-JIT-Deployment.de.md) ([EN](docs/ODA-JIT-Deployment.md)) · [Konzept](docs/ODA-JIT-EnterpriseAdmin-Konzept.docx) · [Multi-Forest-Setup](docs/ODA-MultiForest-Setup-Leitfaden.docx) · [Parallelbetrieb-Plan](docs/ODA-JIT-Parallelbetrieb-Plan.de.md) |
+| **E — PIM-Trust (optionale Härtung)** | Admin-Forest mit PIM-Trust und Shadow Principals, damit der Ausführer keine dauerhafte Mitgliedschaft in Produktion hält | Ausführer ohne dauerhafte Produktionsrechte | Bordmittel von AD DS (`netdom`, Shadow Principals) | [PIM-Trust-Leitfaden](docs/PAM-Trust-Shadow-Principals.de.md) ([EN](docs/PAM-Trust-Shadow-Principals.md)) |
+
+Alle Dokumente sind in der [Dokumentationsübersicht](docs/README.de.md) aufgeführt.
+
 ## Skripte
 
 | Skript | Zweck | Geltungsbereich |

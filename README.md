@@ -10,6 +10,20 @@ Manage WMI namespace security (DACL) and Service Control Manager (SCM) permissio
 
 These scripts are essential for **ODA Active Directory Assessment least-privilege delegation**, enabling a non-Domain Admin / non-Enterprise Admin service account to query WMI and SCM on domain controllers.
 
+## Supported approaches
+
+The toolkit supports several ways to give the ODA assessment account the access it needs. Pick one path (paths can be combined with the optional hardening in path E):
+
+| Path | Approach | Standing Tier-0 exposure | Scripts | Documentation |
+| ---- | -------- | ------------------------ | ------- | ------------- |
+| **A — Delegation** | Static least-privilege delegation for a gMSA (WMI, SCM, Netlogon, AD rights, SYSVOL, DFSR). No Domain/Enterprise Admin. Audit with `Get-ODADelegationStatus.ps1` | Backup Operators, SYSVOL Modify and Replicating Directory Changes are standing | `Process-DCs.ps1` and the `Set-*` scripts | [Delegation guide](docs/ODA-Delegation-Guide.md) ([DE](docs/ODA-Delegation-Guide.de.md)) · [Scripts](#scripts) |
+| **B — JIT (granular)** | Path A, but the Tier-0 / write-capable rights are granted only around the weekly window | None outside the window | `Invoke-ODAJitDelegation.ps1` (`-Mode Granular`) | [JIT alternative](#invoke-odajitdelegationps1-just-in-time-alternative) · [Delegation guide](docs/ODA-Delegation-Guide.md) |
+| **C — JIT (Full EA, manual triggers)** | Single time-limited Enterprise Admins membership (PAM TTL) toggled by your own triggers | None outside the window (one standing Tier-0 executor) | `Invoke-ODAJitDelegation.ps1` (`-Mode FullEA`) | [Variant C](#variant-c--full-elevation-enterprise-admin-with--mode-fullea) |
+| **D — JIT (Full EA, automated)** | Scheduled grant before the window, watcher revokes after the ODA run ended plus grace period, hard deadline, one config per forest | None outside the window (one standing Tier-0 executor) | `Start-ODAJitGrant.ps1`, `Start-ODAJitRevokeWatcher.ps1`, `Register-ODAJitTasks.ps1`, `ODAJit.Common.psm1` | [ODA-JIT automation](#oda-jit-automation-fullea-grant-revoke-watcher-scheduled-tasks) · [Deployment guide](docs/ODA-JIT-Deployment.md) ([DE](docs/ODA-JIT-Deployment.de.md)) · [Concept (DE)](docs/ODA-JIT-EnterpriseAdmin-Konzept.docx) · [Multi-forest setup (DE)](docs/ODA-MultiForest-Setup-Leitfaden.docx) · [Parallel operation plan (DE)](docs/ODA-JIT-Parallelbetrieb-Plan.de.md) |
+| **E — PIM trust (optional hardening)** | Admin forest with PIM trust and shadow principals so the executor holds no standing membership in production | Executor without standing production rights | built-in AD DS features (`netdom`, shadow principals) | [PIM trust guide](docs/PAM-Trust-Shadow-Principals.md) ([DE](docs/PAM-Trust-Shadow-Principals.de.md)) |
+
+All documents are indexed in the [documentation overview](docs/README.md).
+
 ## Scripts
 
 | Script | Purpose | Scope |
