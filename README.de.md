@@ -36,6 +36,7 @@ Alle Dokumente sind in der [Dokumentationsübersicht](docs/README.de.md) aufgef�
 | `Process-DCs.ps1` | Orchestrierungsskript — durchläuft alle DCs und wendet WMI-, SCM- und Netlogon-Berechtigungen an | Alle DCs |
 | `Invoke-ODAJitDelegation.ps1` | **JIT-Alternative** — gewährt/entzieht nur die Tier-0-/schreibfähigen Rechte (Backup Operators, SYSVOL-Schreibrecht, Replizierung von Verzeichnisänderungen) rund um das wöchentliche Assessment-Fenster | Gesamtstruktur (JIT) |
 | `Start-ODAJitGrant.ps1` / `Start-ODAJitRevokeWatcher.ps1` / `Register-ODAJitTasks.ps1` | **Automatisiertes FullEA-JIT** — EA-Vergabe per Zeitplan vor dem Fenster, Watcher entzieht nach Ende des ODA-Laufs + Karenzzeit, harte Deadline (Konfiguration je Forest: `ODAJit.example.psd1`) | Gesamtstruktur (JIT) |
+| [`Azure/Copy-ODAJitDataCollectionRules.ps1`](Azure/README.de.md) | Legt die zusätzlichen Azure-Monitor-Datensammlungsregeln für eine **zweite ODA-Instanz auf demselben Arc-Rechner** an (eigenes Arbeitsverzeichnis + eigener Workspace) | Azure (je Arc-Rechner) |
 
 ## Warum mehrere Skripte?
 

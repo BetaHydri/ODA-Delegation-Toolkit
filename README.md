@@ -36,6 +36,7 @@ All documents are indexed in the [documentation overview](docs/README.md).
 | `Process-DCs.ps1` | Orchestration script — loops through all DCs and applies WMI, SCM, and Netlogon permissions | All DCs |
 | `Invoke-ODAJitDelegation.ps1` | **JIT alternative** — grants/revokes only the Tier-0 / write-capable rights (Backup Operators, SYSVOL Write, Replicating Directory Changes) around the weekly assessment window | Forest (JIT) |
 | `Start-ODAJitGrant.ps1` / `Start-ODAJitRevokeWatcher.ps1` / `Register-ODAJitTasks.ps1` | **Automated FullEA JIT** — scheduled EA grant before the window, watcher that revokes after the ODA run ended + grace period, hard deadline (config per forest: `ODAJit.example.psd1`) | Forest (JIT) |
+| [`Azure/Copy-ODAJitDataCollectionRules.ps1`](Azure/README.md) | Creates the extra Azure Monitor data collection rules for a **second ODA instance on the same Arc machine** (own working directory + own workspace) | Azure (per Arc machine) |
 
 ## Why Multiple Scripts?
 
