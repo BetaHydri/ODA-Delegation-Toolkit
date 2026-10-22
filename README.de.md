@@ -491,7 +491,9 @@ Copy-Item .\ODAJit.example.psd1 C:\ODA-JIT\ODAJit.contoso.psd1    # anpassen
 # Trockenlauf des Watchers (nur Erkennung, kein Revoke)
 .\Start-ODAJitRevokeWatcher.ps1 -ConfigPath C:\ODA-JIT\ODAJit.contoso.psd1 -WhatIf
 
-# Manueller Lauf außerhalb des Wochenfensters
+# Manueller Lauf außerhalb des Wochenfensters. Den Watcher innerhalb von RunStartToleranceMinutes
+# (Standard 15) nach den Tasks starten, sonst die vom Grant ausgegebene Task-Startzeit übergeben
+# (-WindowStart '<yyyy-MM-dd HH:mm:ss>'), andernfalls wird der Lauf als Incomplete gemeldet.
 .\Start-ODAJitGrant.ps1 -ConfigPath C:\ODA-JIT\ODAJit.contoso.psd1 -StartOdaTasks
 .\Start-ODAJitRevokeWatcher.ps1 -ConfigPath C:\ODA-JIT\ODAJit.contoso.psd1 -WindowStart (Get-Date)
 

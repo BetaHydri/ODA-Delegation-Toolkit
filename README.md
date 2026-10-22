@@ -564,7 +564,9 @@ Copy-Item .\ODAJit.example.psd1 C:\ODA-JIT\ODAJit.contoso.psd1    # edit
 # Dry run of the watcher (detection only, no revoke)
 .\Start-ODAJitRevokeWatcher.ps1 -ConfigPath C:\ODA-JIT\ODAJit.contoso.psd1 -WhatIf
 
-# Manual run outside the weekly window
+# Manual run outside the weekly window. Start the watcher within RunStartToleranceMinutes
+# (default 15) after the tasks, otherwise pass the task start time printed by the grant
+# (-WindowStart '<yyyy-MM-dd HH:mm:ss>'), or the run is reported as Incomplete.
 .\Start-ODAJitGrant.ps1 -ConfigPath C:\ODA-JIT\ODAJit.contoso.psd1 -StartOdaTasks
 .\Start-ODAJitRevokeWatcher.ps1 -ConfigPath C:\ODA-JIT\ODAJit.contoso.psd1 -WindowStart (Get-Date)
 
