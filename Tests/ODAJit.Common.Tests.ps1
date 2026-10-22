@@ -171,6 +171,17 @@ Describe 'Get-ODARunState' {
         $s = Get-ODARunState -Tasks $tasks -ExpectedTaskNames @('ADAssessment') -WindowStart $Window -NoStartTimeoutMinutes 90 -Now $Window.AddMinutes(10)
         $s.Status | Should -Be 'Pending'
     }
+    It 'counts a manual run started shortly before the window start (tolerance)' {
+        $tasks = @((New-Task 'ADAssessment' 'Ready' $Window.AddMinutes(-3)), (New-Task 'ADSecurityAssessment' 'Ready' $Window.AddMinutes(-3)))
+        $s = Get-ODARunState -Tasks $tasks -Now $Window.AddMinutes(95) -RunStartToleranceMinutes 15 @common
+        $s.Status | Should -Be 'Finished'
+        $s.RanTasks | Should -Be $names
+    }
+    It 'does not count a run older than the tolerance' {
+        $tasks = @((New-Task 'ADAssessment' 'Ready' $Window.AddMinutes(-16)))
+        $s = Get-ODARunState -Tasks $tasks -ExpectedTaskNames @('ADAssessment') -WindowStart $Window -NoStartTimeoutMinutes 90 -RunStartToleranceMinutes 15 -Now $Window.AddMinutes(10)
+        $s.Status | Should -Be 'Pending'
+    }
     It 'handles a never-run task (LastRunTime $null)' {
         $s = Get-ODARunState -Tasks @((New-Task 'ADAssessment' 'Ready' $null)) -ExpectedTaskNames @('ADAssessment') -WindowStart $Window -NoStartTimeoutMinutes 90 -Now $Window.AddMinutes(100)
         $s.Status | Should -Be 'Incomplete'

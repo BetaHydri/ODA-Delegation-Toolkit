@@ -497,6 +497,7 @@ notepad 'C:\ODA-JIT\Config\ODAJit.forest-a.psd1'
 | `GrantLeadMinutes` | **Vorlaufzeit des Grants**: Die Grant-Aufgabe nimmt die Gruppe so viele Minuten **vor** `WindowStart` in Enterprise Admins auf | Standard `60`. Muss die Zeit bis zur Sichtbarkeit der Mitgliedschaft auf den `SiteGlobalCatalogs` und bis zur Nutzbarkeit des gMSA-Tickets abdecken (Replikation, `VerifyTimeoutMinutes`). Legt zugleich die Startzeit der Grant-Aufgabe fest |
 | `GraceMinutes` | **Sicherheitswartezeit vor dem Entzug**: Sieht der Watcher das Endesignal (alle Aufgaben gelaufen, kein `OMSAssessment.exe`), wartet er so lange und prüft erneut; nur bei unverändertem Zustand wird EA entzogen | Standard `30`. Deckt kurze Pausen zwischen zwei Aufgaben oder nachlaufende Prozesse ab, damit EA nicht mitten im Lauf entfällt. Ändert sich der Zustand (neuer Lauf startet), beobachtet der Watcher weiter. Reicht nie über die Deadline hinaus |
 | `NoStartTimeoutMinutes` | **Grenze „Aufgabe ist nicht gestartet"**, gemessen ab `WindowStart`: Eine aufgeführte Aufgabe, die bis dahin nicht gelaufen ist, gilt als *nicht gelaufen*. Läuft zugleich nichts, lautet das Ergebnis `Incomplete` (Entzug + Warnung statt Warten bis zur Deadline) | Standard `90`. Muss **größer als der Startversatz der letzten ODA-Aufgabe** sein (z. B. zweite Aufgabe bei +30 min → mindestens 31) und **kleiner als** `DeadlineHours` (Letzteres erzwingt die Konfigurationsprüfung) |
+| `RunStartToleranceMinutes` | **Toleranz für Läufe kurz vor `WindowStart`**: Eine Aufgabe, deren letzter Lauf höchstens so viele Minuten vor `WindowStart` liegt, gilt als *gelaufen*. Nötig für manuelle Tests, bei denen die ODA-Aufgaben (`-StartOdaTasks`) vor dem Watcher mit `-WindowStart (Get-Date)` gestartet werden | Standard `15`. Ohne Toleranz wird ein solcher Lauf als `Incomplete` („Aufgabe(n) nicht gelaufen") gemeldet, obwohl er lief. Das Grant-Log gibt die exakte Task-Startzeit für `-WindowStart` aus |
 | `DeadlineHours` | **Harte Obergrenze des EA-Fensters**: Bei `WindowStart` + dieser Zeit entzieht der Watcher EA **unabhängig vom Zustand** (Ergebnis `Deadline`, Event 1012). Begrenzt zugleich die Laufzeit der Watcher-Aufgabe (+1 h) | Standard `6`. Mindestens **3× die längste gemessene Gesamtlaufzeit** aller aufgeführten Aufgaben; so kurz wie möglich halten (EA bleibt bei hängender Aufgabe bis dahin aktiv). Nicht über mehrere Tage dehnen |
 | `TtlHours` | **PAM-Lebensdauer der Mitgliedschaft** (nur mit `UsePamTtl = $true`): AD entfernt die Mitgliedschaft nach dieser Zeit selbst, **auch wenn Tier-0-Host oder Watcher ausfallen** (letzte Absicherung; Event 1013 meldet einen fehlgeschlagenen Entzug) | Standard `8`. Die TTL beginnt beim Grant und muss daher `GrantLeadMinutes` + `DeadlineHours` übersteigen (erzwingt die Konfigurationsprüfung); etwa 1 h Reserve einplanen, damit die TTL keinen regulären Lauf abschneidet |
 | `UsePamTtl` | PAM-TTL verwenden | `$false`, falls PAM nicht aktiv ist (2.4) |
@@ -794,7 +795,9 @@ Am einfachsten registriert man dazu die Aufgaben (Schritt 8) und startet sie man
 ```
 
 Prüfen: Grant-Log OK, Event 1000; Watcher erkennt Ende → Event 1010; das gMSA ist danach nicht
-mehr in Enterprise Admins; die ODA-Ergebnisse sind vollständig (keine leeren Tabellenblätter).
+mehr in Enterprise Admins; die ODA-Ergebnisse sind vollständig (keine leeren Tabellenblätter). Liegt
+zwischen dem Start der Tasks und dem Watcher mehr als `RunStartToleranceMinutes`, statt `(Get-Date)` die
+vom Grant ausgegebene exakte Task-Startzeit verwenden (`-WindowStart '<yyyy-MM-dd HH:mm:ss>'`).
 
 > **Info – was „echter Testlauf" bedeutet.** Der erste Block (`-WhatIf`) ändert **nichts**: kein
 > Grant, kein Assessment-Start, kein Revoke – nur Vorprüfungen. Der zweite Block ist der

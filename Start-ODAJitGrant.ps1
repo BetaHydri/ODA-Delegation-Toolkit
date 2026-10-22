@@ -161,6 +161,7 @@ if ($cfg.SiteGlobalCatalogs.Count -gt 0) {
 
 # 4) Optional manual start
 if ($StartOdaTasks) {
+    $startedAt = Get-Date
     $session = New-CimSession -ComputerName $cfg.Collector
     try {
         foreach ($t in @(Get-ScheduledTask -CimSession $session | Select-ODAJitTask -Config $cfg)) {
@@ -169,7 +170,7 @@ if ($StartOdaTasks) {
         }
     }
     finally { Remove-CimSession -CimSession $session -ErrorAction SilentlyContinue }
-    Write-ODAJitLog 'Start the watcher with -WindowStart set to now to revoke after this manual run.' 'WARN'
+    Write-ODAJitLog ("Start the watcher with the task start time to revoke after this manual run: -WindowStart '{0:yyyy-MM-dd HH:mm:ss}'" -f $startedAt) 'WARN'
 }
 
 $msg = "ODA-JIT grant OK for forest $($cfg.ForestName): $($cfg.AccountGroupDN) is Enterprise Admin until revoke (TTL $($cfg.TtlHours) h)."

@@ -482,6 +482,7 @@ notepad 'C:\ODA-JIT\Config\ODAJit.forest-a.psd1'
 | `GrantLeadMinutes` | **Lead time of the grant**: the Grant task adds the group to Enterprise Admins this many minutes **before** `WindowStart` | Default `60`. Must cover the time until the membership is visible on `SiteGlobalCatalogs` and the gMSA's ticket is usable (replication, `VerifyTimeoutMinutes`). Also sets the start time of the Grant task |
 | `GraceMinutes` | **Safety wait before the revoke**: after the watcher sees the end signal (all tasks ran, no `OMSAssessment.exe`), it waits this long and checks again; only if the state is unchanged does it revoke | Default `30`. Covers short gaps between two tasks or late follow-up processes so EA is not removed in the middle of a run. If the state changes (new run starts), the watcher keeps watching. Never extends beyond the deadline |
 | `NoStartTimeoutMinutes` | **"Task did not start" limit**, measured from `WindowStart`: a listed task that has not run by then counts as *not run*. When nothing is running either, the outcome is `Incomplete` (revoke + warning instead of waiting until the deadline) | Default `90`. Must be **greater than the start offset of the last ODA task** (e.g. second task at +30 min → at least 31) and **shorter than** `DeadlineHours` (the config validation enforces the latter) |
+| `RunStartToleranceMinutes` | **Tolerance for runs just before `WindowStart`**: a task whose last run is at most this many minutes before `WindowStart` still counts as *ran*. Needed for manual tests, where the ODA tasks are started (`-StartOdaTasks`) before the watcher is started with `-WindowStart (Get-Date)` | Default `15`. Without it such a run is reported as `Incomplete` ("task(s) not run in window") although it ran. The grant log prints the exact task start time for `-WindowStart` |
 | `DeadlineHours` | **Hard upper limit of the EA window**: at `WindowStart` + this time the watcher revokes EA **regardless of the state** (outcome `Deadline`, event 1012). Also limits the runtime of the Watcher task (+1 h) | Default `6`. At least **3× the longest measured total run** of all listed tasks; keep it as short as possible (EA is active until then if a task hangs). Do not stretch across several days |
 | `TtlHours` | **PAM time-to-live of the membership** (only with `UsePamTtl = $true`): AD removes the membership by itself after this time, **even if the Tier-0 host or the watcher fails** (last backstop, event 1013 covers a failed revoke) | Default `8`. The TTL starts at the grant, so it must exceed `GrantLeadMinutes` + `DeadlineHours` (the config validation enforces this); keep a reserve of about 1 h so the TTL never cuts a regular run |
 | `UsePamTtl` | Use the PAM TTL | `$false` if PAM is not enabled (2.4) |
@@ -771,7 +772,9 @@ simplest way is to register the tasks (step 8) and start them manually:
 ```
 
 Check: grant log OK, event 1000; the watcher detects the end → event 1010; the gMSA is no longer
-in Enterprise Admins; the ODA results are complete (no empty sheets).
+in Enterprise Admins; the ODA results are complete (no empty sheets). If more than
+`RunStartToleranceMinutes` pass between starting the tasks and the watcher, use the exact task start
+time printed by the grant (`-WindowStart '<yyyy-MM-dd HH:mm:ss>'`) instead of `(Get-Date)`.
 
 > **Info – what "real trial run" means.** The first block (`-WhatIf`) changes **nothing**: no grant,
 > no assessment start, no revoke – only pre-checks. The second block is the **live test**:

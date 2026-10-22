@@ -37,6 +37,7 @@
     PollMinutes               = 5    # watcher polling interval
     GraceMinutes              = 30   # wait after the end signal (all tasks ran, no OMSAssessment.exe), then re-check, then revoke
     NoStartTimeoutMinutes     = 90   # from WindowStart: a task not started by then counts as 'not run' -> revoke early (> last task offset, < Deadline)
+    RunStartToleranceMinutes  = 15   # a task run up to this long BEFORE WindowStart still counts as 'ran' (manual run started before the watcher)
     DeadlineHours             = 6    # from WindowStart: hard revoke regardless of state (>= 3x longest run)
     TtlHours                  = 8    # from the grant: PAM TTL backstop; must exceed GrantLead + Deadline (keep ~1 h reserve)
     UsePamTtl                 = $true  # $false if the PAM optional feature is not enabled (FFL < 2016)

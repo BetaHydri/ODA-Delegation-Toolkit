@@ -102,7 +102,7 @@ else {
 $resultFiles = @()
 if ($result.Outcome -in 'Finished', 'Incomplete') {
     try {
-        $resultFiles = @(Get-ODAResultFile -Config $cfg -Since $WindowStart)
+        $resultFiles = @(Get-ODAResultFile -Config $cfg -Since $WindowStart.AddMinutes(-$cfg.RunStartToleranceMinutes))
         foreach ($f in $resultFiles) { Write-ODAJitLog ("Result file: {0} ({1:yyyy-MM-dd HH:mm})" -f $f.FullName, $f.LastWriteTime) 'OK' }
         if ($resultFiles.Count -eq 0) { Write-ODAJitLog 'No *.recommendations.* file written in the window.' 'WARN' }
     }

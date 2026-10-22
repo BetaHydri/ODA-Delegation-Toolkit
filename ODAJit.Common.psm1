@@ -83,6 +83,7 @@ $script:ConfigDefaults = @{
     PollMinutes               = 5
     GraceMinutes              = 30
     NoStartTimeoutMinutes     = 90
+    RunStartToleranceMinutes  = 15
     DeadlineHours             = 6
     TtlHours                  = 8
     UsePamTtl                 = $true
@@ -122,7 +123,7 @@ function Test-ODAJitConfig {
     catch { throw "ODA-JIT config: WindowStart '$($cfg.WindowStart)' must use the format HH:mm (e.g. '02:00')." }
 
     foreach ($k in 'GrantLeadMinutes', 'WatcherStartOffsetMinutes', 'PollMinutes', 'GraceMinutes',
-        'NoStartTimeoutMinutes', 'DeadlineHours', 'TtlHours', 'VerifyTimeoutMinutes') {
+        'NoStartTimeoutMinutes', 'RunStartToleranceMinutes', 'DeadlineHours', 'TtlHours', 'VerifyTimeoutMinutes') {
         $cfg[$k] = [int]$cfg[$k]
         if ($cfg[$k] -lt 0) { throw "ODA-JIT config: $k must not be negative." }
     }
@@ -224,7 +225,8 @@ function Get-ODAJitTriggerTimes {
 #region Run-state evaluation (pure)
 
 # Evaluates the end-of-collection signals:
-#   T1 task state + LastRunTime >= window start, T3 no assessment process.
+#   T1 task state + LastRunTime >= window start (minus RunStartToleranceMinutes, so a manual run
+#   started shortly before the watcher still counts), T3 no assessment process.
 # Status: Running | Pending | Finished | Incomplete
 function Get-ODARunState {
     [CmdletBinding()]
@@ -234,13 +236,15 @@ function Get-ODARunState {
         [Parameter(Mandatory)] [string[]]$ExpectedTaskNames,
         [Parameter(Mandatory)] [datetime]$WindowStart,
         [Parameter(Mandatory)] [datetime]$Now,
-        [Parameter(Mandatory)] [int]$NoStartTimeoutMinutes
+        [Parameter(Mandatory)] [int]$NoStartTimeoutMinutes,
+        [int]$RunStartToleranceMinutes = 0
     )
     $Tasks = @($Tasks | Where-Object { $_ })
+    $ranSince = $WindowStart.AddMinutes(-$RunStartToleranceMinutes)
     $running = @($Tasks | Where-Object { $_.State -in 'Running', 'Queued' } | ForEach-Object { $_.TaskName })
     $ran = @($ExpectedTaskNames | Where-Object {
             $name = $_
-            @($Tasks | Where-Object { $_.TaskName -eq $name -and $_.LastRunTime -and $_.LastRunTime -ge $WindowStart }).Count -gt 0
+            @($Tasks | Where-Object { $_.TaskName -eq $name -and $_.LastRunTime -and $_.LastRunTime -ge $ranSince }).Count -gt 0
         })
     $missing = @($ExpectedTaskNames | Where-Object { $_ -notin $ran })
     $notFound = @($ExpectedTaskNames | Where-Object { $n = $_; @($Tasks | Where-Object { $_.TaskName -eq $n }).Count -eq 0 })
@@ -372,7 +376,8 @@ function Wait-ODAJitCompletion {
             $raw = & $GetCollectorState
             Get-ODARunState -Tasks $raw.Tasks -ProcessCount $raw.ProcessCount `
                 -ExpectedTaskNames $Config.OdaTaskNames -WindowStart $WindowStart `
-                -Now (& $GetNow) -NoStartTimeoutMinutes $Config.NoStartTimeoutMinutes
+                -Now (& $GetNow) -NoStartTimeoutMinutes $Config.NoStartTimeoutMinutes `
+                -RunStartToleranceMinutes $Config.RunStartToleranceMinutes
         }
         catch {
             Write-ODAJitLog "Collector query failed: $($_.Exception.Message)" 'WARN'
