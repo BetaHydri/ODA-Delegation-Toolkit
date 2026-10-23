@@ -836,6 +836,26 @@ Das Skript
 - legt die Ereignisquelle `ODA-JIT` und den Log-Ordner an,
 - vergleicht die Trigger der ODA-Aufgaben auf dem Collector mit der Konfiguration.
 
+**Höchste Privilegien und Ausführungsrichtlinie**
+
+- Beide Aufgaben (Grant und Revoke) werden bereits mit **„Mit höchsten Privilegien ausführen“**
+  (`RunLevel Highest`) registriert. Eine manuelle Nachstellung ist nicht nötig.
+- Standardmäßig enthalten beide Aufgabenaktionen `-ExecutionPolicy RemoteSigned`. Startet eine
+  Aufgabe dadurch nicht (z. B. Skripte nicht signiert oder nicht entsperrt), reproduziert die
+  Registrierung mit `-ExecutionPolicy Bypass` die Einstellung, die sich beim Kunden bewährt hat:
+
+  ```powershell
+  .\Register-ODAJitTasks.ps1 -ConfigPath C:\ODA-JIT\Config\ODAJit.forest-a.psd1 -ExecutionPolicy Bypass
+  ```
+
+- `Bypass` gilt nur für den von der Aufgabe gestarteten PowerShell-Prozess. Eine per
+  Gruppenrichtlinie gesetzte Ausführungsrichtlinie (`MachinePolicy`/`UserPolicy`) hat Vorrang und
+  wird dadurch **nicht** übersteuert (prüfen mit `Get-ExecutionPolicy -List`). Für Tier-0 bleiben
+  signierte Skripte mit `AllSigned` die Empfehlung; `RemoteSigned` bleibt der Standard.
+- **Jede erneute Registrierung überschreibt beide Aufgaben.** Die gewünschte Ausführungsrichtlinie
+  muss daher jedes Mal erneut angegeben werden – sonst steht wieder `RemoteSigned` in den Aufgaben,
+  auch wenn sie zuvor manuell auf `Bypass` umgestellt wurden.
+
 ```powershell
 Get-ScheduledTask -TaskPath '\ODA-JIT\' | Get-ScheduledTaskInfo |
     Select-Object TaskName, NextRunTime, LastRunTime, LastTaskResult
@@ -845,6 +865,10 @@ Get-ScheduledTask -TaskPath '\ODA-JIT\' | Get-ScheduledTaskInfo |
 
 1. Dauerhafte EA-Mitgliedschaft des Assessment-gMSA bzw. der Gruppe entfernen (falls vorhanden).
 2. Ersten regulären Lauf abwarten und Events 1000 → 1010 sowie die Ergebnisse prüfen.
+   **Die Abnahme umfasst den erfolgreichen Revoke:** Logfiles und die Aufnahme der Gruppe in
+   Enterprise Admins belegen nur den Grant. Zusätzlich müssen das Revoke-Log, ein Event 1010
+   (1011/1012 = Entzug mit Warnung, 1013 = Entzug fehlgeschlagen) und die tatsächlich entfernte
+   Gruppenmitgliedschaft nach Laufende und Karenzzeit bestätigt sein.
 3. Im SIEM überwachen:
    - Events 1001, 1011, 1012, 1013 (Quelle `ODA-JIT`) auf dem Tier-0-Host
    - 4756/4757 für Enterprise Admins außerhalb des Fensters oder durch ein anderes Konto als `svc-ODA-JIT$`
@@ -895,3 +919,4 @@ darf, und genau das widerspricht der Forest-Trennung. **Nicht empfohlen.**
 | Watcher endet mit `Incomplete`, ein Assessment fehlt (Event 1013) | `ADAssessment` und `ADSecurityAssessment` laufen an **verschiedenen Tagen** | Beide auf denselben `WindowDay` legen (Schritt 6, Option A) oder zwei getrennte Fenster (Option B) |
 | Keine Events im Application-Log | Ereignisquelle fehlt | `Register-ODAJitTasks.ps1` als Administrator ausführen |
 | Skript startet nicht („nicht digital signiert“) | Internet-Kennzeichnung oder `AllSigned` ohne Signatur | `Unblock-File` bzw. Skripte signieren |
+| Aufgabe startet nicht, obwohl gMSA und Batch-Recht stimmen | Ausführungsrichtlinie `RemoteSigned` in der Aufgabenaktion blockiert die Skripte | `Register-ODAJitTasks.ps1 -ExecutionPolicy Bypass` (oder signieren und `AllSigned`); eine Gruppenrichtlinie hat Vorrang (`Get-ExecutionPolicy -List`). Die erneute Registrierung überschreibt beide Aufgaben (Schritt 8) |

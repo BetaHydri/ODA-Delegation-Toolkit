@@ -812,6 +812,26 @@ The script
 - creates the event source `ODA-JIT` and the log folder,
 - compares the triggers of the ODA tasks on the collector with the configuration.
 
+**Highest privileges and execution policy**
+
+- Both tasks (grant and revoke) are already registered with **"Run with highest privileges"**
+  (`RunLevel Highest`). No manual adjustment is needed.
+- By default both task actions contain `-ExecutionPolicy RemoteSigned`. If a task does not start
+  because of it (e.g. scripts unsigned or not unblocked), registering with
+  `-ExecutionPolicy Bypass` reproduces the setting that worked at a customer:
+
+  ```powershell
+  .\Register-ODAJitTasks.ps1 -ConfigPath C:\ODA-JIT\Config\ODAJit.forest-a.psd1 -ExecutionPolicy Bypass
+  ```
+
+- `Bypass` only applies to the PowerShell process started by the task. An execution policy set by
+  Group Policy (`MachinePolicy`/`UserPolicy`) takes precedence and is **not** overridden (check with
+  `Get-ExecutionPolicy -List`). For Tier-0, signed scripts with `AllSigned` remain the
+  recommendation; `RemoteSigned` stays the default.
+- **Every re-registration overwrites both tasks.** Supply the desired execution policy again each
+  time – otherwise the tasks contain `RemoteSigned` again, even if they were manually switched to
+  `Bypass` before.
+
 ```powershell
 Get-ScheduledTask -TaskPath '\ODA-JIT\' | Get-ScheduledTaskInfo |
     Select-Object TaskName, NextRunTime, LastRunTime, LastTaskResult
@@ -821,6 +841,10 @@ Get-ScheduledTask -TaskPath '\ODA-JIT\' | Get-ScheduledTaskInfo |
 
 1. Remove the standing EA membership of the assessment gMSA / group (if any).
 2. Wait for the first regular run; check events 1000 → 1010 and the results.
+   **Acceptance includes a successful revoke:** log files and the group being added to Enterprise
+   Admins only prove the grant. The revoke log, an event 1010 (1011/1012 = revoke with warning,
+   1013 = revoke failed) and the group membership actually removed after the end of the run and the
+   grace period must be confirmed as well.
 3. Monitor in the SIEM:
    - events 1001, 1011, 1012, 1013 (source `ODA-JIT`) on the Tier-0 host
    - 4756/4757 for Enterprise Admins outside the window or by an account other than `svc-ODA-JIT$`
@@ -871,3 +895,4 @@ contradicts the forest separation. **Not recommended.**
 | Watcher ends with `Incomplete`, one assessment missing (event 1013) | `ADAssessment` and `ADSecurityAssessment` run on **different days** | Put both on the same `WindowDay` (step 6, option A) or use two separate windows (option B) |
 | No events in the Application log | Event source missing | Run `Register-ODAJitTasks.ps1` elevated |
 | Script does not start ("not digitally signed") | Internet mark or `AllSigned` without signature | `Unblock-File` or sign the scripts |
+| Task does not start although gMSA and batch right are correct | Execution policy `RemoteSigned` in the task action blocks the scripts | `Register-ODAJitTasks.ps1 -ExecutionPolicy Bypass` (or sign and use `AllSigned`); a Group Policy takes precedence (`Get-ExecutionPolicy -List`). Re-registering overwrites both tasks (step 8) |
