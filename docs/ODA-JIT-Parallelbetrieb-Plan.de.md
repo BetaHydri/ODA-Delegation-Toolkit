@@ -138,7 +138,7 @@ Der Prozesscheck (`OMSAssessment.exe`) bleibt instanzübergreifend. Daher versch
 | Kriterium | Prüfung |
 | --------- | ------- |
 | Beide FullEA-Aufgaben laufen erfolgreich | Events 1000 bis 1010 (Quelle `ODA-JIT`) |
-| EA nur im Fenster | 4756/4757: Aufnahme vor dem Lauf, Entzug nach dem Lauf (Event 1011) |
+| EA nur im Fenster | 4756/4757: Aufnahme vor dem Lauf, Entzug nach dem Lauf (Event 1010) |
 | Ergebnisqualität | Zeilen je Sheet im FullEA-Workbook gegenüber dem Delegations-Workbook, keine leeren Sheets |
 | Alte Aufgabe unberührt | Delegationslauf an seinem Tag unverändert erfolgreich |
 | Kein EA-Rest | Nach dem Fenster keine EA-Mitgliedschaft der Gruppe, Deadline-Backstop (Event 1012) nur im Fehlerfall |
